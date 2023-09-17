@@ -10,6 +10,7 @@
 #include <time.h>
 
 #define MAX_THREADS 64
+#define MAX_SENDERS 1024
 
 struct thread_data {
 	pthread_t pth;
@@ -20,6 +21,14 @@ struct thread_data {
 	long long loops;  /* number of loops back */
 	long long losses; /* sum of holes */
 } __attribute__((aligned(64)));
+
+struct sender_data {
+	pthread_rwlock_t lock;
+	unsigned int addr_hash;
+	unsigned int prev_counter;
+} __attribute__((aligned(64)));
+
+struct sender_data sender_data[MAX_SENDERS];
 
 
 void die(int err, const char *msg)
@@ -89,13 +98,14 @@ unsigned int small_hash(const void *input, int len)
 void *udprx(void *arg)
 {
 	struct thread_data *td = arg;
+	struct sender_data *sd;
 	int fd = td->fd;
 	ssize_t len;
 	char buffer[65536];
 	struct sockaddr_in addr;
 	socklen_t salen;
 	char *p1 = buffer, *p0, *e;
-	unsigned int hash;
+	unsigned int hash, bucket;
 	unsigned int counter, prev_counter;
 
 	prev_counter = 0;
@@ -168,12 +178,41 @@ void *udprx(void *arg)
 		if (*p1 == ' ')
 			p1++;
 
-		/* the beginning of the message is expected to be a counter */
+		/* the beginning of the message is expected to be a counter. */
 		counter = read_uint(p1, e);
+
+		bucket = hash;
+		while (bucket >= MAX_SENDERS)
+			bucket = (bucket % MAX_SENDERS) ^ (bucket / MAX_SENDERS);
+
+		sd = &sender_data[bucket];
+
+		pthread_rwlock_rdlock(&sd->lock);
+
+		while (sd->addr_hash != hash) {
+			/* hash collision, replace the entry under a write lock */
+			pthread_rwlock_unlock(&sd->lock);
+			pthread_rwlock_wrlock(&sd->lock);
+
+			sd->addr_hash = hash;
+			sd->prev_counter = counter;
+
+			pthread_rwlock_unlock(&sd->lock);
+			pthread_rwlock_rdlock(&sd->lock);
+		}
+
+		/* the entries in sender_data are atomically accessed under
+		 * the shared read lock. We must not deal with packets received
+		 * out of order on multiple threads for the same hash anyway.
+		 */
+		prev_counter = __atomic_load_n(&sender_data[bucket].prev_counter, __ATOMIC_RELAXED);
 		if (counter < prev_counter)
-			td->loops++;
+			__atomic_add_fetch(&td->loops, 1, __ATOMIC_RELAXED);
 		else if (counter > prev_counter + 1)
-			td->losses += counter - prev_counter - 1;
+			__atomic_add_fetch(&td->losses, counter - prev_counter - 1, __ATOMIC_RELAXED);
+		prev_counter = counter;
+		__atomic_store_n(&sender_data[bucket].prev_counter, prev_counter, __ATOMIC_RELAXED);
+		pthread_rwlock_unlock(&sd->lock);
 	}
 
 	close(fd);
@@ -206,6 +245,11 @@ int main(int argc, char **argv)
 		if (port < 0 || port > 65535)
 			die(1, "Invalid port number\n");
 		argc--; argv++;
+	}
+
+	for (i = 0; i < MAX_SENDERS; i++) {
+		memset(&sender_data[i], 0, sizeof(sender_data[i]));
+		pthread_rwlock_init(&sender_data[i].lock, NULL);
 	}
 
 	memset(&saddr, 0, sizeof(saddr));
