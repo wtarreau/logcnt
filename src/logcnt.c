@@ -197,7 +197,7 @@ void *udprx(void *arg)
 			/* hash collision, replace the entry under a write lock */
 			sd->addr_hash = hash;
 			sd->head = counter;
-			sd->prev_seen = ~0UL; /* assume all predecessors were received */
+			sd->prev_seen = 0UL; /* assume no predecessors were received */
 		}
 
 		if (counter + WINSZ < sd->head) {
@@ -242,7 +242,8 @@ void *udprx(void *arg)
 					__atomic_add_fetch(&td->dups, 1, __ATOMIC_RELAXED);
 				sd->prev_seen |= mask; // count prev head
 				lost = __builtin_popcountl(drop);
-				__atomic_add_fetch(&td->losses, lost, __ATOMIC_RELAXED);
+				if (lost && sd->head >= WINSZ)
+					__atomic_add_fetch(&td->losses, lost, __ATOMIC_RELAXED);
 			} else {
 				/* even out of next window: all unreceived are lost */
 				int lost;
