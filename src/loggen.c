@@ -51,24 +51,94 @@ struct errmsg {
 const int zero = 0;
 const int one = 1;
 
-const struct ist fields[16][4] = {
-	{ IST("zero=0 "),      IST("ZERO=0 "),       IST("[0]=zero "),                       IST("[0]=thirteen_minus_eleven_minus_two "), },
-	{ IST("one=1 "),       IST("ONE=1 "),        IST("[1]=zero_plus_one "),              IST("[1]=thirteen_minus_eleven_minus_one "), },
-	{ IST("two=2 "),       IST("TWO=2 "),        IST("[2]=one_plus_one "),               IST("[2]=thirteen_minus_eleven "),           },
-	{ IST("three=3 "),     IST("THREE=3 "),      IST("[3]=one_plus_two "),               IST("[3]=eleven_minus_seven_minus_one "),    },
-	{ IST("four=4 "),      IST("FOUR=4 "),       IST("[4]=two_times_two "),              IST("[4]=eleven_minus_seven "),              },
-	{ IST("five=5 "),      IST("FIVE=5 "),       IST("[5]=two_plus_three "),             IST("[5]=thirteen_minus_seven_minus_one "),  },
-	{ IST("six=6 "),       IST("SIX=6 "),        IST("[6]=two_times_three "),            IST("[6]=thirteen_minus_seven "),            },
-	{ IST("seven=7 "),     IST("SEVEN=7 "),      IST("[7]=two_plus_five "),              IST("[7]=thirteen_minus_five_minus_one "),   },
-	{ IST("eight=8 "),     IST("EIGHT=8 "),      IST("[8]=two_power_three "),            IST("[8]=thirteen_minus_five "),             },
-	{ IST("nine=9 "),      IST("NINE=9 "),       IST("[9]=three_power_two "),            IST("[9]=thirteen_minus_three_minus_one "),  },
-	{ IST("ten=10 "),      IST("TEN=10 "),       IST("[10]=two_times_five "),            IST("[10]=thirteen_minus_three "),           },
-	{ IST("eleven=11 "),   IST("ELEVEN=11 "),    IST("[11]=seven_plus_three_plus_one "), IST("[11]=thirteen_minus_two "),             },
-	{ IST("twelve=12 "),   IST("TWELVE=12 "),    IST("[12]=three_times_two_power_two "), IST("[12]=thirteen_minus_one "),             },
-	{ IST("thirteen=13 "), IST("THIRTEEN=13 "),  IST("[13]=eleven_plus_two "),           IST("[13]=seventeen_minus_two_times_two "),  },
-	{ IST("fourteen=14 "), IST("FOURTEEN=14 "),  IST("[14]=seven_times_two "),           IST("[14]=seventeen_minus_three "),          },
-	{ IST("fifteen=15 "),  IST("FIFTEEN=15 "),   IST("[15]=five_times_three "),          IST("[15]=seventeen_minus_two "),            },
-};
+/* roughly 5 kB of random text */
+const char *lorem =
+	"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Aliquam "
+	"tempus fringilla ullamcorper. Vestibulum ante ipsum primis in "
+	"faucibus orci luctus et ultrices posuere cubilia curae; Aliquam "
+	"quis risus dictum, eleifend dolor a, venenatis sem. Vestibulum "
+	"ante ipsum primis in faucibus orci luctus et ultrices posuere "
+	"cubilia curae; Nulla molestie hendrerit varius. Cras quis mauris "
+	"at nunc sodales egestas. Vivamus bibendum nec quam et "
+	"bibendum. Morbi quis arcu porttitor, eleifend nisi blandit, "
+	"aliquam neque. Cras mollis eu felis quis tincidunt. Nam non nibh "
+	"ipsum. Sed consequat nulla eget tortor dapibus iaculis. Vivamus "
+	"aliquet, turpis sit amet eleifend cursus, velit nibh elementum "
+	"urna, suscipit faucibus lectus justo et lacus. Nulla at lectus "
+	"volutpat, facilisis metus vel, porta est. Aliquam in eros a urna "
+	"suscipit dignissim at eu leo. Nunc congue sem at urna egestas "
+	"tincidunt. Nullam at pulvinar velit, a dictum est. Aliquam id "
+	"sollicitudin purus. Ut aliquam maximus viverra. Pellentesque "
+	"tristique risus eros, malesuada viverra lorem bibendum at. Aliquam "
+	"mattis lacus quis massa maximus malesuada. Proin ut sem nec est "
+	"dignissim dignissim. Donec sagittis erat lobortis arcu pretium "
+	"porttitor. Donec eu tellus sodales felis rutrum rhoncus. Aliquam "
+	"malesuada neque ligula, interdum imperdiet enim varius tincidunt. "
+	"Nulla condimentum euismod tortor quis sollicitudin. Duis massa "
+	"arcu, sagittis vitae velit et, rutrum consectetur risus. "
+	"Suspendisse bibendum gravida fermentum. Proin rutrum at dui at "
+	"commodo. Nulla vitae laoreet arcu. Proin imperdiet tortor eget "
+	"massa lacinia auctor. Pellentesque quis congue lacus. Fusce id "
+	"augue quam. Duis eget erat sed turpis scelerisque porttitor ac "
+	"lobortis sem. Duis at mauris vitae urna volutpat fringilla. Etiam "
+	"viverra nibh nisl, at cursus orci mollis vitae. Aliquam bibendum "
+	"tortor eu nunc vestibulum, finibus vehicula elit porttitor. "
+	"Aliquam erat volutpat. Vestibulum a ex vel magna finibus gravida "
+	"in at tellus. Phasellus a tincidunt est. Suspendisse potenti. "
+	"Quisque mauris mi, mattis ut libero vitae, scelerisque condimentum "
+	"lorem. Duis bibendum neque id ex eleifend luctus. Aliquam erat "
+	"volutpat. Orci varius natoque penatibus et magnis dis parturient "
+	"montes, nascetur ridiculus mus. Integer enim turpis, auctor vel "
+	"venenatis sollicitudin, scelerisque id purus. Proin elementum "
+	"consequat rhoncus. Aenean posuere felis eget placerat lacinia. "
+	"Nam laoreet luctus velit vitae ultrices. Mauris porta feugiat "
+	"ante, ut tincidunt velit pretium vitae. Sed convallis ante nec "
+	"egestas eleifend. Sed imperdiet justo ut auctor bibendum. Donec "
+	"ligula sem, finibus nec tellus at, gravida lobortis tellus. "
+	"Curabitur posuere magna nisl. Mauris dignissim volutpat "
+	"ullamcorper. Nulla gravida et nisl sed vestibulum. Duis libero "
+	"metus, pellentesque nec porttitor vel, dictum at enim. Mauris "
+	"luctus risus eget ligula porta tempus. Quisque eu egestas sem. "
+	"Pellentesque ac arcu molestie, vulputate velit ut, pellentesque "
+	"dui. Nam id consequat quam. Aenean sit amet tellus a enim "
+	"imperdiet sodales. In vestibulum ut massa eget tempus. Curabitur "
+	"eu luctus elit, quis cursus odio. Nullam porta, urna a dapibus "
+	"elementum, purus enim porttitor enim, a ultrices enim ex id sem. "
+	"Maecenas varius ullamcorper felis, sit amet ullamcorper libero "
+	"volutpat a. Suspendisse accumsan lacinia dolor, sit amet lobortis "
+	"urna mattis ac. Duis vitae aliquam lorem, a porttitor odio. "
+	"Vestibulum eget magna vitae leo feugiat accumsan a et nisi. Nam "
+	"pretium nec orci ac volutpat. Aliquam sodales, justo at ultricies "
+	"porta, felis dolor placerat purus, sit amet faucibus leo nisi et "
+	"erat. Sed faucibus tincidunt libero, ac venenatis ante malesuada "
+	"eget. Orci varius natoque penatibus et magnis dis parturient "
+	"montes, nascetur ridiculus mus. Sed mi purus, lobortis sit amet "
+	"leo at, venenatis elementum tortor. In quis ultrices dui. Cras "
+	"nec elementum nulla. Aliquam imperdiet, mauris et elementum "
+	"hendrerit, nibh ante commodo nisl, vel iaculis est purus malesuada "
+	"sem. Quisque et nulla metus. Ut ullamcorper placerat nisi. Ut "
+	"rhoncus mollis fringilla. Etiam urna tellus, ullamcorper id "
+	"lobortis eget, finibus id nisl. Sed id nunc rutrum, ullamcorper "
+	"odio in, mattis eros. Sed et condimentum eros, at molestie est. "
+	"Ut eu nulla sit amet lorem molestie sagittis. Nullam cursus massa "
+	"a nulla dictum, ac fermentum nibh ornare. Donec ut efficitur "
+	"libero. Nunc odio ipsum, facilisis et erat et, viverra placerat "
+	"neque. Proin id dignissim justo, in efficitur tortor. Curabitur "
+	"eget nisl lectus. Morbi eu arcu ut nulla accumsan tincidunt. "
+	"Mauris malesuada sed metus vitae pulvinar. Aliquam maximus elit "
+	"nec nunc malesuada, eu porttitor urna vestibulum. Nullam "
+	"placerat, eros in vestibulum maximus, mauris ligula dapibus orci, "
+	"eu tincidunt urna tortor eget enim. Aliquam aliquet tortor quis "
+	"arcu tincidunt, nec fringilla lectus accumsan. Aenean semper, "
+	"purus malesuada sagittis euismod, velit eros varius nunc, et "
+	"vehicula velit risus et elit. Donec ut fringilla neque, vitae "
+	"lacinia dui. Morbi aliquam lectus mauris, eget placerat leo "
+	"mollis vel. In purus ligula, tristique quis posuere sodales, "
+	"ultricies eu nulla. Vivamus et lorem sed mi pulvinar varius sit "
+	"amet ac dolor. Vestibulum id mollis nibh, ut consectetur turpis. "
+	"Donec interdum mattis lectus tincidunt interdum. Pellentesque "
+	"aliquam maximus tellus, quis laoreet ante imperdiet et. Lorem "
+	"ipsum dolor sit justo.\n";
 
 /* fields used by syslog, all must contain the trailing space */
 const char *log_prio = "<134> "; // LOG_LOCAL0 + LOG_INFO
@@ -239,15 +309,16 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 	long long diff = 0;
 	unsigned int x;
 	int hdr_len, hdr_num;
+	int lorem_len = strlen(lorem);
+	const char *lorem_end = lorem + lorem_len;
 	int len = 0;
-	int cnt;
 
 	struct ist prio = ist(log_prio);
 	struct ist date = ist(log_date);
 	struct ist host = ist(log_host);
 	struct ist tag  = ist(log_tag);
 	struct ist counter;
-	struct ist lf = IST("\n");
+	struct ist msg;
 
 	msghdr.msg_iov     = iovec;
 	msghdr.msg_iovlen  = 0;
@@ -291,24 +362,18 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 		counter.len = counter_buf + sizeof(counter_buf) - counter.ptr;
 		len += ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, counter);
 
-		// generate random fields, multiple times if needed
+		/* append random-sized text, terminated with LF. Let's first
+		 * produce a cubic random from 0 to 4286583807 (~2^32) centered
+		 * around 536870912 (2^29), then we scale it down to the text
+		 * length. This means that for a 5.3kB text, the avg message
+		 * size will be around 660 bytes long.
+		 */
 		x = statistical_prng();
-		cnt = x >> 28;
-		//cnt = 0;
-		do {
-			int idx, form;
+		x = (x >> 22) * ((x >> 11) & 2047) * (x & 2047);
+		x = mul32hi(x, lorem_len - 2) + 1;
 
-			for (idx = 0; idx < 14; idx++) {
-				form = (x >> (idx*2)) & 3;
-				if (form)
-					len += ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, fields[idx][form-(cnt&1)]);
-			}
-			if (cnt)
-				x = statistical_prng();
-		} while (cnt--);
-
-		/* and finally the LF */
-		len += ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, lf);
+		msg = ist2(lorem_end - x, x);
+		len += ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, msg);
 
 		if (pkt >= start_num)
 			if (sendmsg(fd, &msghdr, MSG_NOSIGNAL | MSG_DONTWAIT) >= 0)
