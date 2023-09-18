@@ -233,6 +233,9 @@ int main(int argc, char **argv)
 	int port = 514;
 	int i, fd;
 
+	if (argc > 1 && argv[1][0] == '-')
+		die(0, "Usage: logcnt [threads] [port]\n");
+
 	if (argc > 1) {
 		num_threads = atoi(argv[1]);
 		if (num_threads < 0 || num_threads > MAX_THREADS)
