@@ -23,6 +23,7 @@ struct thread_data {
 	long long bytes;  /* rcvd bytes    */
 	long long loops;  /* number of loops back */
 	long long losses; /* sum of holes */
+	long long dups;   /* sum of duplicates */
 } __attribute__((aligned(64)));
 
 struct sender_data {
@@ -206,6 +207,8 @@ void *udprx(void *arg)
 				 * just consider this is the oldest possible packet.
 				 */
 				sd->prev_seen <<= (sd->head - counter + WINSZ);
+				if (sd->prev_seen & 1)
+					__atomic_add_fetch(&td->dups, 1, __ATOMIC_RELAXED);
 			} else {
 				/* even out of previous window */
 				sd->prev_seen = 0;
@@ -215,19 +218,29 @@ void *udprx(void *arg)
 			__atomic_add_fetch(&td->loops, 1, __ATOMIC_RELAXED);
 		} else if (counter < sd->head) {
 			/* still within current window */
-			sd->prev_seen |= 1UL << (counter - sd->head + WINSZ);
+			unsigned long mask = 1UL << (counter - sd->head + WINSZ);
+
+			if (sd->prev_seen & mask)
+				__atomic_add_fetch(&td->dups, 1, __ATOMIC_RELAXED);
+			sd->prev_seen |= mask;
+		} else if (counter == sd->head && sd->head) {
+			__atomic_add_fetch(&td->dups, 1, __ATOMIC_RELAXED);
 		} else if (counter > sd->head) {
 			if (counter < sd->head + WINSZ) {
 				/* still within next window, we can keep some bits
 				 * and count the lost ones (those we're going to drop
 				 * that still have a zero bit).
 				 */
+				unsigned long mask = 1UL << (sd->head + WINSZ - counter);
 				unsigned long drop;
 				int lost;
 
 				drop = ~(~0UL << (counter - sd->head)) & ~sd->prev_seen;
 				sd->prev_seen >>= counter - sd->head;
-				sd->prev_seen |= 1UL << (sd->head + WINSZ - counter); // count prev head
+
+				if (sd->prev_seen & mask)
+					__atomic_add_fetch(&td->dups, 1, __ATOMIC_RELAXED);
+				sd->prev_seen |= mask; // count prev head
 				lost = __builtin_popcountl(drop);
 				__atomic_add_fetch(&td->losses, lost, __ATOMIC_RELAXED);
 			} else {
@@ -258,6 +271,7 @@ int main(int argc, char **argv)
 	long long total_bytes = 0;
 	long long total_losses = 0;
 	long long total_loops = 0;
+	long long total_dups = 0;
 	int tot_time = 0;
 	int num_threads = 1;
 	int port = 514;
@@ -311,27 +325,29 @@ int main(int argc, char **argv)
 	for (i = 0; i < num_threads; i++)
 		pthread_create(&td[i].pth, NULL, udprx, (void *)&td[i]);
 
-	printf("  time   totmsg    totbytes   totloss totloops |  msg/s   bytes/s loss/s loops/s\n");
+	printf("  time   totmsg    bytes   losses dups loops |  msg/s   bytes/s loss/s dups/s loops/s\n");
 	while (1) {
 		long long prev_msgs = total_msgs;
 		long long prev_bytes = total_bytes;
 		long long prev_losses = total_losses;
 		long long prev_loops = total_loops;
+		long long prev_dups = total_dups;
 
 		sleep(1);
 		tot_time++;
-		total_msgs = total_bytes = total_losses = total_loops = 0;
+		total_msgs = total_bytes = total_losses = total_loops = total_dups = 0;
 		for (i = 0; i < num_threads; i++) {
 			total_msgs += td[i].count;
 			total_bytes += td[i].bytes;
 			total_losses += td[i].losses;
 			total_loops += td[i].loops;
+			total_dups += td[i].dups;
 		}
 
-		printf("%6d %lld %lld %lld %lld | %lld %lld %lld %lld\n",
-		       tot_time, total_msgs, total_bytes, total_losses, total_loops,
+		printf("%6d %lld %lld %lld %lld %lld | %lld %lld %lld %lld %lld\n",
+		       tot_time, total_msgs, total_bytes, total_losses, total_dups, total_loops,
 		       total_msgs-prev_msgs, total_bytes-prev_bytes,
-		       total_losses-prev_losses, total_loops-prev_loops);
+		       total_losses-prev_losses, total_dups-prev_dups, total_loops-prev_loops);
 	}
 
 	close(fd);
