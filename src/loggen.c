@@ -153,7 +153,6 @@ const char *log_tag  = "loggen:";
 static int bitrate;
 static int pktrate;
 static int count = 1;
-static int start_num = 0;
 static char *address = "";
 unsigned int statistical_prng_state = 0x12345678;
 
@@ -378,9 +377,8 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 
 		len += ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, (char *)lorem_end - x, x);
 
-		if (pkt >= start_num)
-			if (sendmsg(fd, &msghdr, MSG_NOSIGNAL | MSG_DONTWAIT) >= 0)
-				totbit += (len + 28) * 8;
+		if (sendmsg(fd, &msghdr, MSG_NOSIGNAL | MSG_DONTWAIT) >= 0)
+			totbit += (len + 28) * 8;
 	}
 
 	printf("%llu packets sent in %lld us\n", pkt, diff);
@@ -424,10 +422,6 @@ int main(int argc, char **argv)
 			count = atol(*++argv);
 			argc--;
 		}
-		else if (strcmp(*argv, "-s") == 0) {
-			start_num = atol(*++argv);
-			argc--;
-		}
 		else if (strcmp(*argv, "-h") == 0) {
 			strncpy(hostname, *++argv, sizeof(hostname) - 1);
 			hostname[strlen(hostname) + 1] = 0;
@@ -444,7 +438,7 @@ int main(int argc, char **argv)
 	if (argc > 0 || !*address) {
 		fprintf(stderr,
 			"usage: %s [ -t address:port ] [ -r pktrate ]\n"
-			"          [ -b bitrate] [ -s start ] [ -n count ]\n"
+			"          [ -b bitrate] [ -n count ]\n"
 			"          [ -h hostname ]\n", prog);
 		exit(1);
 	}
