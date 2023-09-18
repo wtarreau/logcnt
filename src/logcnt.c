@@ -260,6 +260,7 @@ int main(int argc, char **argv)
 	for (i = 0; i < num_threads; i++) {
 		const int one = 1;
 
+		memset(&td[i], 0, sizeof(td[i]));
 		fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 		if (fd < 0)
 			die_err(1, "socket");
