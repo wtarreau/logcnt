@@ -140,11 +140,16 @@ const char *lorem =
 	"aliquam maximus tellus, quis laoreet ante imperdiet et. Lorem "
 	"ipsum dolor sit justo.\n";
 
+/* used to create a date */
+const char *monthname[12] = {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+};
+
 /* fields used by syslog, all must contain the trailing space */
-const char *log_prio = "<134> "; // LOG_LOCAL0 + LOG_INFO
-const char *log_date = "Sep 17 19:34:00 ";
+int log_prio = 134; // LOG_LOCAL0 + LOG_INFO
 const char *log_host = "localhost ";
-const char *log_tag  = "loggen: ";
+const char *log_tag  = "loggen:";
 
 static int bitrate;
 static int pktrate;
@@ -298,25 +303,29 @@ void wait_micro(struct timeval *from, unsigned long long delay)
 	(IST).len;  /* return size */		\
 })
 
+#define ADD_IOV2(IOV, CNT, PTR, LEN) ({			\
+	(IOV)[CNT].iov_base = (PTR);			\
+	(IOV)[CNT].iov_len  = (LEN);			\
+	(CNT)++;					\
+	(IOV)[(CNT)-1].iov_len;  /* return size */	\
+})
+
 void flood(int fd, struct sockaddr_storage *to, int tolen)
 {
 	struct timeval start, now;
 	unsigned long long pkt;
 	unsigned long long totbit = 0;
-	struct iovec iovec[256]; // max: ~4 + 1 + 15*14 + 1
+	struct iovec iovec[3]; // hdr, counter, msg
 	struct msghdr msghdr;
 	char counter_buf[30];
 	long long diff = 0;
 	unsigned int x;
-	int hdr_len, hdr_num;
+	int hdr_len;
 	int lorem_len = strlen(lorem);
 	const char *lorem_end = lorem + lorem_len;
+	time_t prev_sec = 0;
+	char hdr[256];
 	int len = 0;
-
-	struct ist prio = ist(log_prio);
-	struct ist date = ist(log_date);
-	struct ist host = ist(log_host);
-	struct ist tag  = ist(log_tag);
 	struct ist counter;
 	struct ist msg;
 
@@ -329,17 +338,14 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 	msghdr.msg_flags = 0;
 
 	hdr_len = 0;
-	hdr_len += ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, prio);
-	hdr_len += ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, date);
-	if (host.len > 1)
-		hdr_len += ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, host);
-	hdr_len += ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, tag);
-
-	hdr_num = msghdr.msg_iovlen; // for easier resets
 
 	gettimeofday(&start, NULL);
+	gettimeofday(&now, NULL);
 
 	for (pkt = 0; pkt < count; pkt++) {
+		if (!bitrate && !pktrate && (pkt & 63) == 0)
+			gettimeofday(&now, NULL); // get time once in a while at least
+
 		while ((pkt && pktrate) || bitrate) {
 			gettimeofday(&now, NULL);
 			diff = tv_diff(&start, &now);
@@ -353,8 +359,20 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 				break;
 		}
 
-		msghdr.msg_iovlen = hdr_num;
-		len = hdr_len;
+		if (now.tv_sec != prev_sec) {
+			/* time changed, rebuild the header */
+			struct tm tm;
+
+			prev_sec = now.tv_sec;
+			localtime_r(&now.tv_sec, &tm);
+
+			hdr_len = snprintf(hdr, sizeof(hdr), "<%d> %s %2d %02d:%02d:%02d %s%s ",
+					   log_prio, monthname[tm.tm_mon], tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
+					   log_host[1] ? log_host : "", log_tag);
+		}
+
+		msghdr.msg_iovlen = 0;
+		len = ADD_IOV2(msghdr.msg_iov, msghdr.msg_iovlen, hdr, hdr_len);
 
 		/* write the counter in ASCII and replace the trailing zero with a space */
 		counter.ptr = utoa(pkt, counter_buf, sizeof(counter_buf));
