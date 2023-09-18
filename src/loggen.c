@@ -40,7 +40,6 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <time.h>
-#include <ist.h>
 
 struct errmsg {
 	char *msg;
@@ -290,20 +289,7 @@ void wait_micro(struct timeval *from, unsigned long long delay)
 	}
 }
 
-#define SET_IOV(IOV, IST) ({		\
-	(IOV).iov_base = (IST).ptr;	\
-	(IOV).iov_len  = (IST).len;	\
-	(IST).len;  /* return size */	\
-})
-
-#define ADD_IOV(IOV, CNT, IST) ({		\
-	(IOV)[CNT].iov_base = (IST).ptr;	\
-	(IOV)[CNT].iov_len  = (IST).len;	\
-	(CNT)++;				\
-	(IST).len;  /* return size */		\
-})
-
-#define ADD_IOV2(IOV, CNT, PTR, LEN) ({			\
+#define ADD_IOV(IOV, CNT, PTR, LEN) ({			\
 	(IOV)[CNT].iov_base = (PTR);			\
 	(IOV)[CNT].iov_len  = (LEN);			\
 	(CNT)++;					\
@@ -318,6 +304,8 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 	struct iovec iovec[3]; // hdr, counter, msg
 	struct msghdr msghdr;
 	char counter_buf[30];
+	char *counter_ptr;
+	int counter_len;
 	long long diff = 0;
 	unsigned int x;
 	int hdr_len;
@@ -326,8 +314,6 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 	time_t prev_sec = 0;
 	char hdr[256];
 	int len = 0;
-	struct ist counter;
-	struct ist msg;
 
 	msghdr.msg_iov     = iovec;
 	msghdr.msg_iovlen  = 0;
@@ -372,13 +358,13 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 		}
 
 		msghdr.msg_iovlen = 0;
-		len = ADD_IOV2(msghdr.msg_iov, msghdr.msg_iovlen, hdr, hdr_len);
+		len = ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, hdr, hdr_len);
 
 		/* write the counter in ASCII and replace the trailing zero with a space */
-		counter.ptr = utoa(pkt, counter_buf, sizeof(counter_buf));
+		counter_ptr = utoa(pkt, counter_buf, sizeof(counter_buf));
 		counter_buf[sizeof(counter_buf) - 1] = ' ';
-		counter.len = counter_buf + sizeof(counter_buf) - counter.ptr;
-		len += ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, counter);
+		counter_len = counter_buf + sizeof(counter_buf) - counter_ptr;
+		len += ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, counter_ptr, counter_len);
 
 		/* append random-sized text, terminated with LF. Let's first
 		 * produce a cubic random from 0 to 4286583807 (~2^32) centered
@@ -390,8 +376,7 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 		x = (x >> 22) * ((x >> 11) & 2047) * (x & 2047);
 		x = mul32hi(x, lorem_len - 2) + 1;
 
-		msg = ist2(lorem_end - x, x);
-		len += ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, msg);
+		len += ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, (char *)lorem_end - x, x);
 
 		if (pkt >= start_num)
 			if (sendmsg(fd, &msghdr, MSG_NOSIGNAL | MSG_DONTWAIT) >= 0)
