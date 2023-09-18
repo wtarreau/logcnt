@@ -12,6 +12,9 @@
 #define MAX_THREADS 64
 #define MAX_SENDERS 1024
 
+// window size
+#define WINSZ (sizeof(long)*8)
+
 struct thread_data {
 	pthread_t pth;
 	int id;           /* thread num    */
@@ -25,7 +28,8 @@ struct thread_data {
 struct sender_data {
 	pthread_rwlock_t lock;
 	unsigned int addr_hash;
-	unsigned int prev_counter;
+	unsigned int head;       /* highest counter seen */
+	unsigned long prev_seen; /* 1 bit per rx before hctr, covers hctr-64 to hctr-1 */
 } __attribute__((aligned(64)));
 
 struct sender_data sender_data[MAX_SENDERS];
@@ -106,9 +110,8 @@ void *udprx(void *arg)
 	socklen_t salen;
 	char *p1 = buffer, *p0, *e;
 	unsigned int hash, bucket;
-	unsigned int counter, prev_counter;
+	unsigned int counter;
 
-	prev_counter = 0;
 	while (1) {
 		salen = sizeof(addr);
 		len = recvfrom(fd, buffer, sizeof(buffer), 0, (struct sockaddr*)&addr, &salen);
@@ -187,31 +190,58 @@ void *udprx(void *arg)
 
 		sd = &sender_data[bucket];
 
-		pthread_rwlock_rdlock(&sd->lock);
+		pthread_rwlock_wrlock(&sd->lock);
 
-		while (sd->addr_hash != hash) {
+		if (sd->addr_hash != hash) {
 			/* hash collision, replace the entry under a write lock */
-			pthread_rwlock_unlock(&sd->lock);
-			pthread_rwlock_wrlock(&sd->lock);
-
 			sd->addr_hash = hash;
-			sd->prev_counter = counter;
-
-			pthread_rwlock_unlock(&sd->lock);
-			pthread_rwlock_rdlock(&sd->lock);
+			sd->head = counter;
+			sd->prev_seen = ~0UL; /* assume all predecessors were received */
 		}
 
-		/* the entries in sender_data are atomically accessed under
-		 * the shared read lock. We must not deal with packets received
-		 * out of order on multiple threads for the same hash anyway.
-		 */
-		prev_counter = __atomic_load_n(&sender_data[bucket].prev_counter, __ATOMIC_RELAXED);
-		if (counter < prev_counter)
+		if (counter + WINSZ < sd->head) {
+			/* rollback out of window */
+			if (counter >= sd->head - 2*WINSZ) {
+				/* still within previous window, we can keep some bits,
+				 * just consider this is the oldest possible packet.
+				 */
+				sd->prev_seen <<= (sd->head - counter + WINSZ);
+			} else {
+				/* even out of previous window */
+				sd->prev_seen = 0;
+			}
+			sd->prev_seen |= 1;
+			sd->head = counter + WINSZ;
 			__atomic_add_fetch(&td->loops, 1, __ATOMIC_RELAXED);
-		else if (counter > prev_counter + 1)
-			__atomic_add_fetch(&td->losses, counter - prev_counter - 1, __ATOMIC_RELAXED);
-		prev_counter = counter;
-		__atomic_store_n(&sender_data[bucket].prev_counter, prev_counter, __ATOMIC_RELAXED);
+		} else if (counter < sd->head) {
+			/* still within current window */
+			sd->prev_seen |= 1UL << (counter - sd->head + WINSZ);
+		} else if (counter > sd->head) {
+			if (counter < sd->head + WINSZ) {
+				/* still within next window, we can keep some bits
+				 * and count the lost ones (those we're going to drop
+				 * that still have a zero bit).
+				 */
+				unsigned long drop;
+				int lost;
+
+				drop = ~(~0UL << (counter - sd->head)) & ~sd->prev_seen;
+				sd->prev_seen >>= counter - sd->head;
+				sd->prev_seen |= 1UL << (sd->head + WINSZ - counter); // count prev head
+				lost = __builtin_popcountl(drop);
+				__atomic_add_fetch(&td->losses, lost, __ATOMIC_RELAXED);
+			} else {
+				/* even out of next window: all unreceived are lost */
+				int lost;
+
+				lost = __builtin_popcountl(~sd->prev_seen);
+				if (counter >= sd->head + 2*WINSZ)
+					lost += counter - 2*WINSZ - sd->head;
+				sd->prev_seen = 0;
+			}
+			sd->head = counter;
+		}
+
 		pthread_rwlock_unlock(&sd->lock);
 	}
 
