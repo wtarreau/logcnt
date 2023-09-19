@@ -567,6 +567,8 @@ int main(int argc, char **argv)
 	int addrlen;
 	int fd;
 
+	setlinebuf(stdout);
+
 	if (gethostname(hostname, sizeof(hostname) - 1) == 0) {
 		hostname[strlen(hostname) + 1] = 0;
 		hostname[strlen(hostname)] = ' ';

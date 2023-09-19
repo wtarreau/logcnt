@@ -284,6 +284,8 @@ int main(int argc, char **argv)
 	int i, fd;
 	int idle = 0;
 
+	setlinebuf(stdout);
+
 	--argc; ++argv;
 
 	while (argc && **argv == '-') {
