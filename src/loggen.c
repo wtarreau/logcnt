@@ -145,6 +145,13 @@ const char *monthname[12] = {
         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 };
 
+/* frequency counter: counts events per second */
+struct freq_ctr {
+	unsigned int curr_sec;
+	unsigned int curr_ctr;
+	unsigned int prev_ctr;
+};
+
 /* fields used by syslog, all must contain the trailing space */
 int log_prio = 134; // LOG_LOCAL0 + LOG_INFO
 const char *log_host = "localhost ";
@@ -158,6 +165,11 @@ unsigned int statistical_prng_state = 0x12345678;
 
 /* current time */
 struct timeval now;
+
+/* measured pkt rate / bit rate */
+static struct freq_ctr meas_pktrate; // pkt / s
+static struct freq_ctr meas_bitrate; // kbit / s
+
 
 /* Multiply the two 32-bit operands and shift the 64-bit result right 32 bits.
  * This is used to compute fixed ratios by setting one of the operands to
@@ -266,6 +278,105 @@ static inline long long tv_diff(struct timeval *tv1, struct timeval *tv2)
 	return ret;
 }
 
+/* Rotate a frequency counter when current period is over. Must not be called
+ * during a valid period. It is important that it correctly initializes a null
+ * area.
+ */
+static inline void rotate_freq_ctr(struct freq_ctr *ctr)
+{
+	ctr->prev_ctr = ctr->curr_ctr;
+	if (now.tv_sec - ctr->curr_sec != 1) {
+		/* we missed more than one second */
+		ctr->prev_ctr = 0;
+	}
+	ctr->curr_sec = now.tv_sec;
+	ctr->curr_ctr = 0; /* leave it at the end to help gcc optimize it away */
+}
+
+/* Update a frequency counter by <inc> incremental units. It is automatically
+ * rotated if the period is over. It is important that it correctly initializes
+ * a null area.
+ */
+static inline void update_freq_ctr(struct freq_ctr *ctr, unsigned int inc)
+{
+	if (ctr->curr_sec == now.tv_sec) {
+		ctr->curr_ctr += inc;
+		return;
+	}
+	rotate_freq_ctr(ctr);
+	ctr->curr_ctr = inc;
+	/* Note: later we may want to propagate the update to other counters */
+}
+
+/* returns the number of remaining events that can occur on this freq counter
+ * while respecting <freq> and taking into account that <pend> events are
+ * already known to be pending. Returns 0 if limit was reached.
+ */
+unsigned int freq_ctr_remain(struct freq_ctr *ctr, unsigned int freq, unsigned int pend)
+{
+	unsigned int frac_prev_sec;
+	unsigned int curr, past;
+	unsigned int age;
+
+	curr = 0;
+	age = now.tv_sec - ctr->curr_sec;
+
+	if (age <= 1) {
+		past = ctr->curr_ctr;
+		if (!age) {
+			curr = past;
+			past = ctr->prev_ctr;
+		}
+		/* fraction of previous second left */
+		frac_prev_sec = (1000000U - now.tv_usec) * 4294U;
+		curr += mul32hi(past, frac_prev_sec);
+	}
+	curr += pend;
+
+	if (curr >= freq)
+		return 0;
+	return freq - curr;
+}
+
+/* return the expected wait time in us before the next event may occur,
+ * respecting frequency <freq>, and assuming there may already be some pending
+ * events. It returns zero if we can proceed immediately, otherwise the wait
+ * time, which will be rounded down 1us for better accuracy, with a minimum
+ * of one us.
+ */
+unsigned int next_event_delay(struct freq_ctr *ctr, unsigned int freq, unsigned int pend)
+{
+	unsigned int frac_prev_sec;
+	unsigned int curr, past;
+	unsigned int wait, age;
+
+	past = 0;
+	curr = 0;
+	age = now.tv_sec - ctr->curr_sec;
+
+	if (age <= 1) {
+		past = ctr->curr_ctr;
+		if (!age) {
+			curr = past;
+			past = ctr->prev_ctr;
+		}
+		/* fraction of previous second left */
+		frac_prev_sec = (1000000U - now.tv_usec) * 4294U;
+		curr += mul32hi(past, frac_prev_sec);
+	}
+	curr += pend;
+
+	if (curr < freq)
+		return 0;
+
+	/* Enough events, let's wait. Each event takes 1/freq sec, thus
+	 * 1000000/freq us.
+	 */
+	curr -= freq;
+	wait = curr * 1000000ULL / (freq ? freq : 1);
+	return wait > 1 ? wait : 1;
+}
+
 void wait_micro(struct timeval *from, unsigned long long delay)
 {
 	struct timeval end;
@@ -302,7 +413,6 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 {
 	struct timeval start;
 	unsigned long long pkt;
-	unsigned long long totbit = 0;
 	struct iovec iovec[3]; // hdr, counter, msg
 	struct msghdr msghdr;
 	char counter_buf[30];
@@ -310,6 +420,7 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 	int counter_len;
 	long long diff = 0;
 	unsigned int x;
+	unsigned toterr;
 	int hdr_len;
 	int lorem_len = strlen(lorem);
 	const char *lorem_end = lorem + lorem_len;
@@ -331,21 +442,25 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 	gettimeofday(&now, NULL);
 
 	for (pkt = 0; pkt < count; pkt++) {
-		if (!cfg_bitrate && !cfg_pktrate && (pkt & 63) == 0)
-			gettimeofday(&now, NULL); // get time once in a while at least
+		if (pkt && (cfg_pktrate || cfg_bitrate)) {
+			unsigned int wait_us1, wait_us2, wait_us;
 
-		while ((pkt && cfg_pktrate) || cfg_bitrate) {
 			gettimeofday(&now, NULL);
-			diff = tv_diff(&start, &now);
-			if (diff <= 0)
-				diff = 1;
-			if (cfg_pktrate && pkt * 1000000UL > diff * (unsigned long long)cfg_pktrate)
-				wait_micro(&now, pkt * 1000000ULL / cfg_pktrate - diff);
-			else if (cfg_bitrate && totbit * 1000000UL > diff * (unsigned long long)cfg_bitrate)
-				wait_micro(&now, totbit * 1000000ULL / cfg_bitrate - diff);
-			else
-				break;
+
+			wait_us1 = cfg_pktrate ? next_event_delay(&meas_pktrate, cfg_pktrate, 0) : 0;
+			wait_us2 = cfg_bitrate ? next_event_delay(&meas_bitrate, cfg_bitrate, 0) : 0;
+
+			wait_us = !cfg_bitrate ? wait_us1 : !cfg_pktrate ? wait_us2 :
+				(wait_us1 > wait_us2) ? wait_us1 : wait_us2;
+
+			if (wait_us)
+				wait_micro(&now, wait_us);
 		}
+		else if ((pkt & 63) == 0) {
+			gettimeofday(&now, NULL); // get time once in a while at least
+		}
+
+		diff = tv_diff(&start, &now);
 
 		if (now.tv_sec != prev_sec) {
 			/* time changed, rebuild the header */
@@ -380,8 +495,21 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 
 		len += ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, (char *)lorem_end - x, x);
 
-		if (sendmsg(fd, &msghdr, MSG_NOSIGNAL | MSG_DONTWAIT) >= 0)
-			totbit += (len + 28) * 8;
+		if (sendmsg(fd, &msghdr, MSG_NOSIGNAL | MSG_DONTWAIT) < 0)
+			toterr++;
+
+		if (cfg_pktrate)
+			update_freq_ctr(&meas_pktrate, 1);
+
+		if (cfg_bitrate) {
+			/* We'll count the IP traffic (len+28). We're counting
+			 * in kbps (125 bytes). Since we're sending random-sized
+			 * datagrams that are often shorter than 1kbit we also
+			 * add 1kbit/2 (62 bytes) to compensate for the loss of
+			 * accuracy.
+			 */
+			update_freq_ctr(&meas_bitrate, (len + 28 + 62) / 125);
+		}
 	}
 
 	printf("%llu packets sent in %lld us\n", pkt, diff);
@@ -441,7 +569,7 @@ int main(int argc, char **argv)
 	if (argc > 0 || !*address) {
 		fprintf(stderr,
 			"usage: %s [ -t address:port ] [ -r pktrate ]\n"
-			"          [ -b bitrate] [ -n count ]\n"
+			"          [ -b kbitrate ] [ -n count ]\n"
 			"          [ -h hostname ]\n", prog);
 		exit(1);
 	}
