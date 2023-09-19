@@ -160,7 +160,8 @@ const char *log_tag  = "loggen:";
 static unsigned int cfg_bitrate;
 static unsigned int cfg_pktrate;
 static unsigned int cfg_rampup;
-static int count = 1;
+static unsigned long long cfg_duration; /* microseconds */
+static unsigned int count;
 static char *address = "";
 unsigned int statistical_prng_state = 0x12345678;
 
@@ -486,6 +487,9 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 		}
 
 		diff = tv_diff(&start, &now);
+		/* maybe it's time to stop ? */
+		if (cfg_duration && diff >= cfg_duration)
+			break;
 
 		if (now.tv_sec != prev_sec) {
 			/* time changed, rebuild the header */
@@ -574,6 +578,12 @@ int main(int argc, char **argv)
 			cfg_bitrate = atol(*++argv);
 			argc--;
 		}
+		else if (argc > 1 && strcmp(*argv, "-d") == 0) {
+			cfg_duration = atol(*++argv) * 1000000ULL;
+			if (!count)
+				count = ~0U;
+			argc--;
+		}
 		else if (argc > 1 && strcmp(*argv, "-n") == 0) {
 			count = atol(*++argv);
 			argc--;
@@ -604,6 +614,7 @@ int main(int argc, char **argv)
 			"  -r <pktrate>   : limit output pkt rate to this number of messages per second\n"
 			"  -b <kbps>      : limit output bandwidth to this number of kbps\n"
 			"  -s <time>      : slowly ramp up the -r/-b values over this number of milliseconds\n"
+			"  -d <duration>  : automatically stop the test after this time in seconds\n"
 			"\n", prog);
 		exit(1);
 	}
@@ -614,6 +625,8 @@ int main(int argc, char **argv)
 	}
 
 	addrlen = (ss.ss_family == AF_INET6) ? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in);
+
+	count = count ? count : 1;
 
 	if ((fd = socket(ss.ss_family, SOCK_DGRAM, 0)) == -1) {
 		perror("socket");
