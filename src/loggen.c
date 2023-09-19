@@ -160,6 +160,8 @@ const char *log_tag  = "loggen:";
 static unsigned int cfg_bitrate;
 static unsigned int cfg_pktrate;
 static unsigned int cfg_rampup;
+static unsigned int cfg_minsize;
+static unsigned int cfg_maxsize;
 static unsigned long long cfg_duration; /* microseconds */
 static unsigned int count;
 static char *address = "";
@@ -430,6 +432,13 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 	time_t prev_sec = 0;
 	char hdr[256];
 	int len = 0;
+	int base_len, extra_len;
+
+	if (!cfg_maxsize)
+		cfg_maxsize = 1024;
+
+	if (cfg_maxsize > lorem_len)
+		cfg_maxsize = lorem_len;
 
 	msghdr.msg_iov     = iovec;
 	msghdr.msg_iovlen  = 0;
@@ -516,11 +525,16 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 		 * produce a cubic random from 0 to 4286583807 (~2^32) centered
 		 * around 536870912 (2^29), then we scale it down to the text
 		 * length. This means that for a 5.3kB text, the avg message
-		 * size will be around 660 bytes long.
+		 * size will be around 660 bytes long. We enforce a minimum of
+		 * cfg_minsize and a maximum of cfg_maxsize. Note that the latter
+		 * might be increased by one to send the LF which is always sent.
 		 */
+		base_len = cfg_minsize > len ? cfg_minsize - len : 0;
+		extra_len = cfg_maxsize > base_len + len + 2 ? cfg_maxsize - base_len - len - 2 : 2;
+
 		x = statistical_prng();
 		x = (x >> 22) * ((x >> 11) & 2047) * (x & 2047);
-		x = mul32hi(x, lorem_len - 2) + 1;
+		x = mul32hi(x, extra_len - 2) + base_len + 1;
 
 		len += ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, (char *)lorem_end - x, x);
 
@@ -584,6 +598,14 @@ int main(int argc, char **argv)
 				count = ~0U;
 			argc--;
 		}
+		else if (argc > 1 && strcmp(*argv, "-m") == 0) {
+			cfg_minsize = atol(*++argv);
+			argc--;
+		}
+		else if (argc > 1 && strcmp(*argv, "-M") == 0) {
+			cfg_maxsize = atol(*++argv);
+			argc--;
+		}
 		else if (argc > 1 && strcmp(*argv, "-n") == 0) {
 			count = atol(*++argv);
 			argc--;
@@ -615,6 +637,8 @@ int main(int argc, char **argv)
 			"  -b <kbps>      : limit output bandwidth to this number of kbps\n"
 			"  -s <time>      : slowly ramp up the -r/-b values over this number of milliseconds\n"
 			"  -d <duration>  : automatically stop the test after this time in seconds\n"
+			"  -m <size>      : minimum message size (def: 0)\n"
+			"  -M <size>      : maximum message size (def: 1024, max ~5300)\n"
 			"\n", prog);
 		exit(1);
 	}
