@@ -4,6 +4,8 @@
 #include <pthread.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/select.h>
+#include <sys/time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -333,8 +335,20 @@ int main(int argc, char **argv)
 		long long prev_losses = total_losses;
 		long long prev_loops = total_loops;
 		long long prev_dups = total_dups;
+		struct timeval now, next;
 
-		sleep(1);
+		/* prepare to sleep till next round second */
+		gettimeofday(&now, NULL);
+
+		next.tv_sec = 0;
+		next.tv_usec = 1000000 - now.tv_usec;
+		if (next.tv_usec >= 1000000) {
+			next.tv_usec = 0;
+			next.tv_sec = 1;
+		}
+
+		select(0, NULL, NULL, NULL, &next);
+
 		tot_time++;
 		total_msgs = total_bytes = total_losses = total_loops = total_dups = 0;
 		for (i = 0; i < num_threads; i++) {
