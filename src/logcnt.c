@@ -278,9 +278,11 @@ int main(int argc, char **argv)
 	long long total_dups = 0;
 	unsigned int tot_time = 0;
 	int cfg_absdate = 0;
+	int cfg_maxidle = 0;
 	int num_threads = 1;
 	int port = 514;
 	int i, fd;
+	int idle = 0;
 
 	--argc; ++argv;
 
@@ -297,6 +299,10 @@ int main(int argc, char **argv)
 				die(1, "Invalid port number\n");
 			argc--; argv++;
 		}
+		else if (argc > 1 && strcmp(*argv, "-i") == 0) {
+			cfg_maxidle = atoi(argv[1]);
+			argc--; argv++;
+		}
 		else if (strcmp(*argv, "-a") == 0) {
 			cfg_absdate = 1;
 		}
@@ -311,6 +317,7 @@ int main(int argc, char **argv)
 			"Usage: %s [options]\n"
 			"  -t <threads> : set receiving threads count (def: 1)\n"
 			"  -p <port>    : set listening port (def: 514)\n"
+			"  -i <seconds> : set idle duration before automatic reset\n"
 			"  -a           : use absolute date\n"
 			"\n", prog);
 		exit(1);
@@ -384,6 +391,21 @@ int main(int argc, char **argv)
 		       total_msgs, total_bytes, total_losses, total_dups, total_loops,
 		       total_msgs-prev_msgs, total_bytes-prev_bytes,
 		       total_losses-prev_losses, total_dups-prev_dups, total_loops-prev_loops);
+
+		if (total_msgs == prev_msgs) {
+			idle++;
+			if (cfg_maxidle && idle >= cfg_maxidle) {
+				for (i = 0; i < num_threads; i++) {
+					prev_msgs   = total_msgs   = td[i].count = 0;
+					prev_bytes  = total_bytes  = td[i].bytes = 0;
+					prev_losses = total_losses = td[i].losses = 0;
+					prev_loops  = total_loops  = td[i].loops = 0;
+					prev_dups   = total_dups   = td[i].dups = 0;
+				}
+			}
+		}
+		else
+			idle = 0;
 	}
 
 	close(fd);
