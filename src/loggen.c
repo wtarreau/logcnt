@@ -562,27 +562,27 @@ int main(int argc, char **argv)
 	--argc; ++argv;
 
 	while (argc && **argv == '-') {
-		if (strcmp(*argv, "-t") == 0) {
+		if (argc > 1 && strcmp(*argv, "-t") == 0) {
 			address = *++argv;
 			argc--;
 		}
-		else if (strcmp(*argv, "-r") == 0) {
+		else if (argc > 1 && strcmp(*argv, "-r") == 0) {
 			cfg_pktrate = atol(*++argv);
 			argc--;
 		}
-		else if (strcmp(*argv, "-b") == 0) {
+		else if (argc > 1 && strcmp(*argv, "-b") == 0) {
 			cfg_bitrate = atol(*++argv);
 			argc--;
 		}
-		else if (strcmp(*argv, "-n") == 0) {
+		else if (argc > 1 && strcmp(*argv, "-n") == 0) {
 			count = atol(*++argv);
 			argc--;
 		}
-		else if (strcmp(*argv, "-s") == 0) {
+		else if (argc > 1 && strcmp(*argv, "-s") == 0) {
 			cfg_rampup = atol(*++argv) * 1000U;
 			argc--;
 		}
-		else if (strcmp(*argv, "-h") == 0) {
+		else if (argc > 1 && strcmp(*argv, "-h") == 0) {
 			strncpy(hostname, *++argv, sizeof(hostname) - 1);
 			hostname[strlen(hostname) + 1] = 0;
 			hostname[strlen(hostname)] = ' ';
@@ -597,9 +597,14 @@ int main(int argc, char **argv)
 
 	if (argc > 0 || !*address) {
 		fprintf(stderr,
-			"usage: %s [ -t address:port ] [ -r pktrate ]\n"
-			"          [ -b kbitrate ] [ -n count ] [ -s rampup_ms ]\n"
-			"          [ -h hostname ]\n", prog);
+			"Usage: %s [options]\n"
+			"  -t <addr:port> : where to send the logs (ipv4:port)\n"
+			"  -h <hostname>  : host name to advertise. Empty value supported. (def: $hostname)\n"
+			"  -n <count>     : send no more than this number of packets (def: 1)\n"
+			"  -r <pktrate>   : limit output pkt rate to this number of messages per second\n"
+			"  -b <kbps>      : limit output bandwidth to this number of kbps\n"
+			"  -s <time>      : slowly ramp up the -r/-b values over this number of milliseconds\n"
+			"\n", prog);
 		exit(1);
 	}
 
