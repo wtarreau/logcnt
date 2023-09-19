@@ -150,8 +150,8 @@ int log_prio = 134; // LOG_LOCAL0 + LOG_INFO
 const char *log_host = "localhost ";
 const char *log_tag  = "loggen:";
 
-static int bitrate;
-static int pktrate;
+static unsigned int cfg_bitrate;
+static unsigned int cfg_pktrate;
 static int count = 1;
 static char *address = "";
 unsigned int statistical_prng_state = 0x12345678;
@@ -331,18 +331,18 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 	gettimeofday(&now, NULL);
 
 	for (pkt = 0; pkt < count; pkt++) {
-		if (!bitrate && !pktrate && (pkt & 63) == 0)
+		if (!cfg_bitrate && !cfg_pktrate && (pkt & 63) == 0)
 			gettimeofday(&now, NULL); // get time once in a while at least
 
-		while ((pkt && pktrate) || bitrate) {
+		while ((pkt && cfg_pktrate) || cfg_bitrate) {
 			gettimeofday(&now, NULL);
 			diff = tv_diff(&start, &now);
 			if (diff <= 0)
 				diff = 1;
-			if (pktrate && pkt * 1000000UL > diff * (unsigned long long)pktrate)
-				wait_micro(&now, pkt * 1000000ULL / pktrate - diff);
-			else if (bitrate && totbit * 1000000UL > diff * (unsigned long long)bitrate)
-				wait_micro(&now, totbit * 1000000ULL / bitrate - diff);
+			if (cfg_pktrate && pkt * 1000000UL > diff * (unsigned long long)cfg_pktrate)
+				wait_micro(&now, pkt * 1000000ULL / cfg_pktrate - diff);
+			else if (cfg_bitrate && totbit * 1000000UL > diff * (unsigned long long)cfg_bitrate)
+				wait_micro(&now, totbit * 1000000ULL / cfg_bitrate - diff);
 			else
 				break;
 		}
@@ -414,11 +414,11 @@ int main(int argc, char **argv)
 			argc--;
 		}
 		else if (strcmp(*argv, "-r") == 0) {
-			pktrate = atol(*++argv);
+			cfg_pktrate = atol(*++argv);
 			argc--;
 		}
 		else if (strcmp(*argv, "-b") == 0) {
-			bitrate = atol(*++argv);
+			cfg_bitrate = atol(*++argv);
 			argc--;
 		}
 		else if (strcmp(*argv, "-n") == 0) {
