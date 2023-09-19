@@ -159,6 +159,7 @@ const char *log_tag  = "loggen:";
 
 static unsigned int cfg_bitrate;
 static unsigned int cfg_pktrate;
+static unsigned int cfg_rampup;
 static int count = 1;
 static char *address = "";
 unsigned int statistical_prng_state = 0x12345678;
@@ -424,6 +425,7 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 	int hdr_len;
 	int lorem_len = strlen(lorem);
 	const char *lorem_end = lorem + lorem_len;
+	unsigned rampup = cfg_rampup;
 	time_t prev_sec = 0;
 	char hdr[256];
 	int len = 0;
@@ -444,13 +446,36 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 	for (pkt = 0; pkt < count; pkt++) {
 		if (pkt && (cfg_pktrate || cfg_bitrate)) {
 			unsigned int wait_us1, wait_us2, wait_us;
+			unsigned int eff_pktrate = cfg_pktrate;
+			unsigned int eff_bitrate = cfg_bitrate;
 
 			gettimeofday(&now, NULL);
+			if (rampup) {
+				diff = tv_diff(&start, &now);
+				if (diff < rampup) {
+					/* startup in t^4 */
+					unsigned int throttle;
 
-			wait_us1 = cfg_pktrate ? next_event_delay(&meas_pktrate, cfg_pktrate, 0) : 0;
-			wait_us2 = cfg_bitrate ? next_event_delay(&meas_bitrate, cfg_bitrate, 0) : 0;
+					throttle = (unsigned long long)~0U * diff / rampup;  // 0 to 2^31-1
+					throttle = ((unsigned long long)throttle * throttle) >> 32;
+					throttle = ((unsigned long long)throttle * throttle) >> 32;
 
-			wait_us = !cfg_bitrate ? wait_us1 : !cfg_pktrate ? wait_us2 :
+					eff_pktrate = ((unsigned long long)eff_pktrate * throttle) >> 32;
+					if (!eff_pktrate)
+						eff_pktrate = 1;
+
+					eff_bitrate = ((unsigned long long)eff_bitrate * throttle) >> 32;
+					if (!eff_bitrate)
+						eff_bitrate = 10; // allow to send at least an avg packet
+				}
+				else
+					rampup = 0; // finished ramping up
+			}
+
+			wait_us1 = eff_pktrate ? next_event_delay(&meas_pktrate, eff_pktrate, 0) : 0;
+			wait_us2 = eff_bitrate ? next_event_delay(&meas_bitrate, eff_bitrate, 0) : 0;
+
+			wait_us = !eff_bitrate ? wait_us1 : !eff_pktrate ? wait_us2 :
 				(wait_us1 > wait_us2) ? wait_us1 : wait_us2;
 
 			if (wait_us)
@@ -553,6 +578,10 @@ int main(int argc, char **argv)
 			count = atol(*++argv);
 			argc--;
 		}
+		else if (strcmp(*argv, "-s") == 0) {
+			cfg_rampup = atol(*++argv) * 1000U;
+			argc--;
+		}
 		else if (strcmp(*argv, "-h") == 0) {
 			strncpy(hostname, *++argv, sizeof(hostname) - 1);
 			hostname[strlen(hostname) + 1] = 0;
@@ -569,7 +598,7 @@ int main(int argc, char **argv)
 	if (argc > 0 || !*address) {
 		fprintf(stderr,
 			"usage: %s [ -t address:port ] [ -r pktrate ]\n"
-			"          [ -b kbitrate ] [ -n count ]\n"
+			"          [ -b kbitrate ] [ -n count ] [ -s rampup_ms ]\n"
 			"          [ -h hostname ]\n", prog);
 		exit(1);
 	}
