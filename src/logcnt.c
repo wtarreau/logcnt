@@ -356,7 +356,7 @@ int main(int argc, char **argv)
 	for (i = 0; i < num_threads; i++)
 		pthread_create(&td[i].pth, NULL, udprx, (void *)&td[i]);
 
-	printf("  time    pct  totmsg    bytes   losses dups loops |  msg/s   bytes/s loss/s dups/s loops/s\n");
+	printf("# time    pct  totmsg    bytes   losses dups loops |  msg/s   bytes/s loss/s dups/s loops/s\n");
 	while (1) {
 		long long prev_msgs = total_msgs;
 		long long prev_bytes = total_bytes;
