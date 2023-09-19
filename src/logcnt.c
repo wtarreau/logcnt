@@ -270,6 +270,7 @@ int main(int argc, char **argv)
 {
 	struct thread_data td[MAX_THREADS];
 	struct sockaddr_in saddr;
+	const char *prog = *argv;
 	long long total_msgs = 0;
 	long long total_bytes = 0;
 	long long total_losses = 0;
@@ -280,21 +281,34 @@ int main(int argc, char **argv)
 	int port = 514;
 	int i, fd;
 
-	if (argc > 1 && argv[1][0] == '-')
-		die(0, "Usage: logcnt [threads] [port]\n");
+	--argc; ++argv;
 
-	if (argc > 1) {
-		num_threads = atoi(argv[1]);
-		if (num_threads < 0 || num_threads > MAX_THREADS)
-			die(1, "Invalid number of threads\n");
-		argc--; argv++;
+	while (argc && **argv == '-') {
+		if (argc > 1 && strcmp(*argv, "-t") == 0) {
+			num_threads = atoi(argv[1]);
+			if (num_threads < 1 || num_threads > MAX_THREADS)
+				die(1, "Invalid number of threads\n");
+			argc--; argv++;
+		}
+		else if (argc > 1 && strcmp(*argv, "-p") == 0) {
+			port = atoi(argv[1]);
+			if (port < 0 || port > 65535)
+				die(1, "Invalid port number\n");
+			argc--; argv++;
+		}
+		else
+			break;
+		argc--;
+		argv++;
 	}
 
-	if (argc > 1) {
-		port = atoi(argv[1]);
-		if (port < 0 || port > 65535)
-			die(1, "Invalid port number\n");
-		argc--; argv++;
+	if (argc > 0) {
+		fprintf(stderr,
+			"Usage: %s [options]\n"
+			"  -t <threads> : set receiving threads count (def: 1)\n"
+			"  -p <port>    : set listening port (def: 514)\n"
+			"\n", prog);
+		exit(1);
 	}
 
 	for (i = 0; i < MAX_SENDERS; i++) {
