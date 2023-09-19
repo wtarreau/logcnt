@@ -156,6 +156,9 @@ static int count = 1;
 static char *address = "";
 unsigned int statistical_prng_state = 0x12345678;
 
+/* current time */
+struct timeval now;
+
 /* Multiply the two 32-bit operands and shift the 64-bit result right 32 bits.
  * This is used to compute fixed ratios by setting one of the operands to
  * (2^32*ratio).
@@ -265,7 +268,7 @@ static inline long long tv_diff(struct timeval *tv1, struct timeval *tv2)
 
 void wait_micro(struct timeval *from, unsigned long long delay)
 {
-	struct timeval end, now;
+	struct timeval end;
 	unsigned int remain;
 
 	end.tv_sec = from->tv_sec + delay / 1000000;
@@ -297,7 +300,7 @@ void wait_micro(struct timeval *from, unsigned long long delay)
 
 void flood(int fd, struct sockaddr_storage *to, int tolen)
 {
-	struct timeval start, now;
+	struct timeval start;
 	unsigned long long pkt;
 	unsigned long long totbit = 0;
 	struct iovec iovec[3]; // hdr, counter, msg
