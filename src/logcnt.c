@@ -276,7 +276,8 @@ int main(int argc, char **argv)
 	long long total_losses = 0;
 	long long total_loops = 0;
 	long long total_dups = 0;
-	int tot_time = 0;
+	unsigned int tot_time = 0;
+	int cfg_absdate = 0;
 	int num_threads = 1;
 	int port = 514;
 	int i, fd;
@@ -296,6 +297,9 @@ int main(int argc, char **argv)
 				die(1, "Invalid port number\n");
 			argc--; argv++;
 		}
+		else if (strcmp(*argv, "-a") == 0) {
+			cfg_absdate = 1;
+		}
 		else
 			break;
 		argc--;
@@ -307,6 +311,7 @@ int main(int argc, char **argv)
 			"Usage: %s [options]\n"
 			"  -t <threads> : set receiving threads count (def: 1)\n"
 			"  -p <port>    : set listening port (def: 514)\n"
+			"  -a           : use absolute date\n"
 			"\n", prog);
 		exit(1);
 	}
@@ -373,8 +378,8 @@ int main(int argc, char **argv)
 			total_dups += td[i].dups;
 		}
 
-		printf("%6d %6.2f %lld %lld %lld %lld %lld | %lld %lld %lld %lld %lld\n",
-		       tot_time,
+		printf("%6u %6.2f %lld %lld %lld %lld %lld | %lld %lld %lld %lld %lld\n",
+		       cfg_absdate ? (unsigned int)now.tv_sec : tot_time,
 		       total_msgs ? total_msgs * 100.0 / (total_msgs + total_losses) : 0.0,
 		       total_msgs, total_bytes, total_losses, total_dups, total_loops,
 		       total_msgs-prev_msgs, total_bytes-prev_bytes,
