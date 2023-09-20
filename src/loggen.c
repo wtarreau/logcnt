@@ -162,6 +162,7 @@ static unsigned int cfg_pktrate;
 static unsigned int cfg_rampup;
 static unsigned int cfg_minsize;
 static unsigned int cfg_maxsize;
+static unsigned int cfg_verbose;
 static unsigned long long cfg_duration; /* microseconds */
 static unsigned int count;
 static char *address = "";
@@ -433,6 +434,7 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 	char hdr[256];
 	int len = 0;
 	int base_len, extra_len;
+	unsigned int tot_wait = 0;
 
 	if (!cfg_maxsize)
 		cfg_maxsize = 1024;
@@ -488,8 +490,12 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 			wait_us = !eff_bitrate ? wait_us1 : !eff_pktrate ? wait_us2 :
 				(wait_us1 > wait_us2) ? wait_us1 : wait_us2;
 
-			if (wait_us)
+			if (wait_us) {
+				struct timeval old_now = now;
 				wait_micro(&now, wait_us);
+				diff = tv_diff(&old_now, &now);
+				tot_wait += diff;
+			}
 		}
 		else if ((pkt & 63) == 0) {
 			gettimeofday(&now, NULL); // get time once in a while at least
@@ -512,6 +518,10 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 			hdr_len = snprintf(hdr, sizeof(hdr), "<%d> %s %2d %02d:%02d:%02d %s%s ",
 					   log_prio, monthname[tm.tm_mon], tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
 					   log_host[1] ? log_host : "", log_tag);
+
+			if (cfg_verbose)
+				printf("idle %5.2f%%\n", tot_wait / 10000.0);
+			tot_wait = 0;
 		}
 
 		msghdr.msg_iovlen = 0;
@@ -619,6 +629,9 @@ int main(int argc, char **argv)
 			cfg_rampup = atol(*++argv) * 1000U;
 			argc--;
 		}
+		else if (strcmp(*argv, "-v") == 0) {
+			cfg_verbose = 1;
+		}
 		else if (argc > 1 && strcmp(*argv, "-h") == 0) {
 			strncpy(hostname, *++argv, sizeof(hostname) - 1);
 			hostname[strlen(hostname) + 1] = 0;
@@ -644,6 +657,7 @@ int main(int argc, char **argv)
 			"  -d <duration>  : automatically stop the test after this time in seconds\n"
 			"  -m <size>      : minimum message size (def: 0)\n"
 			"  -M <size>      : maximum message size (def: 1024, max ~5300)\n"
+			"  -v             : enable verbose mode\n"
 			"\n", prog);
 		exit(1);
 	}
