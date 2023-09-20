@@ -185,7 +185,7 @@ struct sender {
 	time_t last_update;     /* last tv_sec we rebuilt the header */
 	int hdr_len;            /* header length */
 	char hdr[256];          /* per-sender message header */
-};
+} __attribute__((aligned(64)));
 
 struct thread_data {
 	struct timeval now;     /* the thread's local time */
@@ -195,6 +195,8 @@ struct thread_data {
 	unsigned int cfg_pktrate;     // pkt/s or zero
 	unsigned int cfg_bitrate;     // kbit/s or zero
 	unsigned int cfg_count;       // total packets to send on this thread
+	unsigned int cfg_senders;     // senders on this thread
+	unsigned int first_sender;    // first sender on this thread
 	unsigned int toterr;
 	unsigned int totok;
 	unsigned int tot_wait;
@@ -460,7 +462,8 @@ void flood(void)
 	int base_len, extra_len;
 	int thr_num = 0;
 	struct thread_data *thr = &thread_data[thr_num];
-	int sender = 0;
+	int sender = thr->first_sender;
+	int stop_sender = sender + thr->cfg_senders;
 
 	if (!cfg_maxsize)
 		cfg_maxsize = 1024;
@@ -626,8 +629,8 @@ void flood(void)
 		}
 
 		sender++;
-		if (sender >= cfg_senders)
-			sender = 0;
+		if (sender >= stop_sender)
+			sender = thr->first_sender;
 	}
 
 	diff = tv_diff(&start_time, &thr->now);
@@ -751,21 +754,10 @@ int main(int argc, char **argv)
 	cfg_count   = cfg_count ? cfg_count : 1;
 
 	/* distribute rates and counters for each thread */
-	if (cfg_count < cfg_threads ||
+	if (cfg_count < cfg_threads || cfg_senders < cfg_threads ||
 	    (cfg_pktrate && cfg_pktrate < cfg_threads) ||
 	    (cfg_bitrate && cfg_bitrate < cfg_threads))
-		die(1, "Please lower the number of threads: count, pktrate and bitrate cannot be lower than the number of threads");
-
-	for (t = 0; t < cfg_threads; t++) {
-		thread_data[t].cfg_count = cfg_count / (cfg_threads - t);
-		cfg_count -= thread_data[t].cfg_count;
-
-		thread_data[t].cfg_pktrate = cfg_pktrate / (cfg_threads - t);
-		cfg_pktrate -= thread_data[t].cfg_pktrate;
-
-		thread_data[t].cfg_bitrate = cfg_bitrate / (cfg_threads - t);
-		cfg_bitrate -= thread_data[t].cfg_bitrate;
-	}
+		die(1, "Please lower the number of threads: count, senders, pktrate and bitrate cannot be lower than the number of threads");
 
 	for (sender = 0; sender < cfg_senders; sender++) {
 		if ((senders[sender].fd = socket(cfg_addr.ss_family, SOCK_DGRAM, 0)) == -1)
@@ -776,6 +768,22 @@ int main(int argc, char **argv)
 
 		if (connect(senders[sender].fd, (struct sockaddr *)&cfg_addr, cfg_addrlen) == -1)
 			die_err(1, "connect()");
+	}
+
+	for (t = 0; t < cfg_threads; t++) {
+		thread_data[t].cfg_count = cfg_count / (cfg_threads - t);
+		cfg_count -= thread_data[t].cfg_count;
+
+		thread_data[t].cfg_pktrate = cfg_pktrate / (cfg_threads - t);
+		cfg_pktrate -= thread_data[t].cfg_pktrate;
+
+		thread_data[t].cfg_bitrate = cfg_bitrate / (cfg_threads - t);
+		cfg_bitrate -= thread_data[t].cfg_bitrate;
+
+		if (t > 0)
+			thread_data[t].first_sender = thread_data[t-1].first_sender + thread_data[t-1].cfg_senders;
+		thread_data[t].cfg_senders = cfg_senders / (cfg_threads - t);
+		cfg_senders -= thread_data[t].cfg_senders;
 	}
 
 	gettimeofday(&start_time, NULL);
