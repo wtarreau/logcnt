@@ -679,6 +679,7 @@ int main(int argc, char **argv)
 	char hostname[256];
 	char *prog = *argv;
 	unsigned int t;
+	unsigned int v;
 	int sender;
 
 	setlinebuf(stdout);
@@ -801,24 +802,22 @@ int main(int argc, char **argv)
 			die_err(1, "connect()");
 	}
 
-	for (t = 0; t < cfg_threads; t++) {
-		thread_data[t].cfg_count = cfg_count / (cfg_threads - t);
-		cfg_count -= thread_data[t].cfg_count;
+	for (v = cfg_count, t = 0; t < cfg_threads; t++)
+		v -= (thread_data[t].cfg_count = v / (cfg_threads - t));
 
-		thread_data[t].cfg_pktrate = cfg_pktrate / (cfg_threads - t);
-		cfg_pktrate -= thread_data[t].cfg_pktrate;
+	for (v = cfg_pktrate, t = 0; t < cfg_threads; t++)
+		v -= (thread_data[t].cfg_pktrate = v / (cfg_threads - t));
 
-		thread_data[t].cfg_bitrate = cfg_bitrate / (cfg_threads - t);
-		cfg_bitrate -= thread_data[t].cfg_bitrate;
+	for (v = cfg_bitrate, t = 0; t < cfg_threads; t++)
+		v -= (thread_data[t].cfg_bitrate = v / (cfg_threads - t));
 
+	for (v = cfg_senders, t = 0; t < cfg_threads; t++) {
+		v -= (thread_data[t].cfg_senders = v / (cfg_threads - t));
 		if (t > 0)
 			thread_data[t].first_sender = thread_data[t-1].first_sender + thread_data[t-1].cfg_senders;
-		thread_data[t].cfg_senders = cfg_senders / (cfg_threads - t);
-		cfg_senders -= thread_data[t].cfg_senders;
 	}
 
 	gettimeofday(&start_time, NULL);
-
 
 	for (t = 0; t < cfg_threads; t++)
 		pthread_create(&thread_data[t].pth, NULL, flood, (void *)(long)t);
