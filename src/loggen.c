@@ -168,6 +168,8 @@ static unsigned int cfg_verbose;
 static unsigned long long cfg_duration; /* microseconds */
 static unsigned int count;
 static unsigned int cfg_senders;
+static struct sockaddr_storage cfg_addr;
+static int cfg_addrlen;
 static char *address = "";
 unsigned int statistical_prng_state = 0x12345678;
 
@@ -427,7 +429,7 @@ void wait_micro(struct timeval *from, unsigned long long delay)
 	(IOV)[(CNT)-1].iov_len;  /* return size */	\
 })
 
-void flood(struct sockaddr_storage *to, int tolen)
+void flood(void)
 {
 	struct timeval start;
 	unsigned long long pkt;
@@ -615,11 +617,9 @@ void die_err(int err, const char *msg)
 
 int main(int argc, char **argv)
 {
-	struct sockaddr_storage ss;
 	struct errmsg err;
 	char hostname[256];
 	char *prog = *argv;
-	int addrlen;
 	int sender;
 
 	setlinebuf(stdout);
@@ -707,28 +707,28 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 
-	if (addr_to_ss(address, &ss, &err) < 0) {
+	if (addr_to_ss(address, &cfg_addr, &err) < 0) {
 		fprintf(stderr, "%s\n", err.msg);
 		exit(1);
 	}
 
-	addrlen = (ss.ss_family == AF_INET6) ? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in);
+	cfg_addrlen = (cfg_addr.ss_family == AF_INET6) ? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in);
 
 	cfg_senders = cfg_senders ? cfg_senders : 1;
 	count = count ? count : 1;
 
 	for (sender = 0; sender < cfg_senders; sender++) {
-		if ((senders[sender].fd = socket(ss.ss_family, SOCK_DGRAM, 0)) == -1)
+		if ((senders[sender].fd = socket(cfg_addr.ss_family, SOCK_DGRAM, 0)) == -1)
 			die_err(1, "socket");
 
 		if (setsockopt(senders[sender].fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) == -1)
 			die_err(1, "setsockopt(SO_REUSEADDR)");
 
-		if (connect(senders[sender].fd, (struct sockaddr *)&ss, addrlen) == -1)
+		if (connect(senders[sender].fd, (struct sockaddr *)&cfg_addr, cfg_addrlen) == -1)
 			die_err(1, "connect()");
 	}
 
-	flood(&ss, addrlen);
+	flood();
 
 	return 0;
 }
