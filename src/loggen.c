@@ -380,7 +380,7 @@ unsigned int freq_ctr_remain(struct timeval *now, struct freq_ctr *ctr, unsigned
  * time, which will be rounded down 1us for better accuracy, with a minimum
  * of one us.
  */
-unsigned int next_event_delay(struct timeval *now, struct freq_ctr *ctr, unsigned int freq, unsigned int pend)
+unsigned int next_event_delay(const struct timeval *now, const struct freq_ctr *ctr, unsigned int freq, unsigned int pend)
 {
 	unsigned int frac_prev_sec;
 	unsigned int curr, past;
