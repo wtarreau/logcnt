@@ -180,7 +180,10 @@ static struct freq_ctr meas_bitrate; // kbit / s
 
 /* describes one sender */
 struct sender {
-	int fd;       /* socket to use when sending */
+	int fd;                 /* socket to use when sending */
+	unsigned int counter;   /* per-sender packet counter */
+	int hdr_len;            /* header length */
+	char hdr[256];          /* per-sender message header */
 };
 
 static struct sender senders[MAX_SENDERS];
@@ -435,16 +438,14 @@ void flood(struct sockaddr_storage *to, int tolen)
 	long long diff = 0;
 	unsigned int x;
 	unsigned toterr = 0;
-	int hdr_len;
 	int lorem_len = strlen(lorem);
 	const char *lorem_end = lorem + lorem_len;
 	unsigned rampup = cfg_rampup;
 	time_t prev_sec = 0;
-	char hdr[256];
 	int len = 0;
 	int base_len, extra_len;
 	unsigned int tot_wait = 0;
-	int fd = senders[0].fd;
+	int sender = 0;
 
 	if (!cfg_maxsize)
 		cfg_maxsize = 1024;
@@ -459,8 +460,6 @@ void flood(struct sockaddr_storage *to, int tolen)
 	msghdr.msg_control = NULL;
 	msghdr.msg_controllen = 0;
 	msghdr.msg_flags = 0;
-
-	hdr_len = 0;
 
 	gettimeofday(&start, NULL);
 	gettimeofday(&now, NULL);
@@ -525,9 +524,11 @@ void flood(struct sockaddr_storage *to, int tolen)
 			prev_sec = now.tv_sec;
 			localtime_r(&now.tv_sec, &tm);
 
-			hdr_len = snprintf(hdr, sizeof(hdr), "<%d> %s %2d %02d:%02d:%02d %s%s ",
-					   log_prio, monthname[tm.tm_mon], tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
-					   log_host[1] ? log_host : "", log_tag);
+			senders[sender].hdr_len =
+				snprintf(senders[sender].hdr, sizeof(senders[sender].hdr),
+					 "<%d> %s %2d %02d:%02d:%02d %s%s ",
+					 log_prio, monthname[tm.tm_mon], tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
+					 log_host[1] ? log_host : "", log_tag);
 
 			if (cfg_verbose)
 				printf("idle %5.2f%%  sent %u/%u (%.2f%%)  err %u (%.2f%%)\n",
@@ -538,10 +539,10 @@ void flood(struct sockaddr_storage *to, int tolen)
 		}
 
 		msghdr.msg_iovlen = 0;
-		len = ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, hdr, hdr_len);
+		len = ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, senders[sender].hdr, senders[sender].hdr_len);
 
 		/* write the counter in ASCII and replace the trailing zero with a space */
-		counter_ptr = utoa(pkt, counter_buf, sizeof(counter_buf));
+		counter_ptr = utoa(senders[sender].counter++, counter_buf, sizeof(counter_buf));
 		counter_buf[sizeof(counter_buf) - 1] = ' ';
 		counter_len = counter_buf + sizeof(counter_buf) - counter_ptr;
 		len += ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, counter_ptr, counter_len);
@@ -563,7 +564,7 @@ void flood(struct sockaddr_storage *to, int tolen)
 
 		len += ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, (char *)lorem_end - x, x);
 
-		if (sendmsg(fd, &msghdr, MSG_NOSIGNAL | MSG_DONTWAIT) < 0)
+		if (sendmsg(senders[sender].fd, &msghdr, MSG_NOSIGNAL | MSG_DONTWAIT) < 0)
 			toterr++;
 
 		if (cfg_pktrate)
