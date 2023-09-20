@@ -41,6 +41,8 @@
 #include <sys/stat.h>
 #include <time.h>
 
+#define MAX_SENDERS 1
+
 struct errmsg {
 	char *msg;
 	int size;
@@ -165,6 +167,7 @@ static unsigned int cfg_maxsize;
 static unsigned int cfg_verbose;
 static unsigned long long cfg_duration; /* microseconds */
 static unsigned int count;
+static unsigned int cfg_senders;
 static char *address = "";
 unsigned int statistical_prng_state = 0x12345678;
 
@@ -175,6 +178,12 @@ struct timeval now;
 static struct freq_ctr meas_pktrate; // pkt / s
 static struct freq_ctr meas_bitrate; // kbit / s
 
+/* describes one sender */
+struct sender {
+	int fd;       /* socket to use when sending */
+};
+
+static struct sender senders[MAX_SENDERS];
 
 /* Multiply the two 32-bit operands and shift the 64-bit result right 32 bits.
  * This is used to compute fixed ratios by setting one of the operands to
@@ -414,7 +423,7 @@ void wait_micro(struct timeval *from, unsigned long long delay)
 	(IOV)[(CNT)-1].iov_len;  /* return size */	\
 })
 
-void flood(int fd, struct sockaddr_storage *to, int tolen)
+void flood(struct sockaddr_storage *to, int tolen)
 {
 	struct timeval start;
 	unsigned long long pkt;
@@ -435,6 +444,7 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 	int len = 0;
 	int base_len, extra_len;
 	unsigned int tot_wait = 0;
+	int fd = senders[0].fd;
 
 	if (!cfg_maxsize)
 		cfg_maxsize = 1024;
@@ -593,7 +603,7 @@ int main(int argc, char **argv)
 	char hostname[256];
 	char *prog = *argv;
 	int addrlen;
-	int fd;
+	int sender;
 
 	setlinebuf(stdout);
 
@@ -684,18 +694,21 @@ int main(int argc, char **argv)
 
 	addrlen = (ss.ss_family == AF_INET6) ? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in);
 
+	cfg_senders = cfg_senders ? cfg_senders : 1;
 	count = count ? count : 1;
 
-	if ((fd = socket(ss.ss_family, SOCK_DGRAM, 0)) == -1)
-		die_err(1, "socket");
+	for (sender = 0; sender < cfg_senders; sender++) {
+		if ((senders[sender].fd = socket(ss.ss_family, SOCK_DGRAM, 0)) == -1)
+			die_err(1, "socket");
 
-	if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) == -1)
-		die_err(1, "setsockopt(SO_REUSEADDR)");
+		if (setsockopt(senders[sender].fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) == -1)
+			die_err(1, "setsockopt(SO_REUSEADDR)");
 
-	if (connect(fd, (struct sockaddr *)&ss, addrlen) == -1)
-		die_err(1, "connect()");
+		if (connect(senders[sender].fd, (struct sockaddr *)&ss, addrlen) == -1)
+			die_err(1, "connect()");
+	}
 
-	flood(fd, &ss, addrlen);
+	flood(&ss, addrlen);
 
 	return 0;
 }
