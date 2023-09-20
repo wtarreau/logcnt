@@ -305,14 +305,14 @@ static inline long long tv_diff(struct timeval *tv1, struct timeval *tv2)
  * during a valid period. It is important that it correctly initializes a null
  * area.
  */
-static inline void rotate_freq_ctr(struct freq_ctr *ctr)
+static inline void rotate_freq_ctr(struct timeval *now, struct freq_ctr *ctr)
 {
 	ctr->prev_ctr = ctr->curr_ctr;
-	if (now.tv_sec - ctr->curr_sec != 1) {
+	if (now->tv_sec - ctr->curr_sec != 1) {
 		/* we missed more than one second */
 		ctr->prev_ctr = 0;
 	}
-	ctr->curr_sec = now.tv_sec;
+	ctr->curr_sec = now->tv_sec;
 	ctr->curr_ctr = 0; /* leave it at the end to help gcc optimize it away */
 }
 
@@ -320,13 +320,13 @@ static inline void rotate_freq_ctr(struct freq_ctr *ctr)
  * rotated if the period is over. It is important that it correctly initializes
  * a null area.
  */
-static inline void update_freq_ctr(struct freq_ctr *ctr, unsigned int inc)
+static inline void update_freq_ctr(struct timeval *now, struct freq_ctr *ctr, unsigned int inc)
 {
-	if (ctr->curr_sec == now.tv_sec) {
+	if (ctr->curr_sec == now->tv_sec) {
 		ctr->curr_ctr += inc;
 		return;
 	}
-	rotate_freq_ctr(ctr);
+	rotate_freq_ctr(now, ctr);
 	ctr->curr_ctr = inc;
 	/* Note: later we may want to propagate the update to other counters */
 }
@@ -335,14 +335,14 @@ static inline void update_freq_ctr(struct freq_ctr *ctr, unsigned int inc)
  * while respecting <freq> and taking into account that <pend> events are
  * already known to be pending. Returns 0 if limit was reached.
  */
-unsigned int freq_ctr_remain(struct freq_ctr *ctr, unsigned int freq, unsigned int pend)
+unsigned int freq_ctr_remain(struct timeval *now, struct freq_ctr *ctr, unsigned int freq, unsigned int pend)
 {
 	unsigned int frac_prev_sec;
 	unsigned int curr, past;
 	unsigned int age;
 
 	curr = 0;
-	age = now.tv_sec - ctr->curr_sec;
+	age = now->tv_sec - ctr->curr_sec;
 
 	if (age <= 1) {
 		past = ctr->curr_ctr;
@@ -351,7 +351,7 @@ unsigned int freq_ctr_remain(struct freq_ctr *ctr, unsigned int freq, unsigned i
 			past = ctr->prev_ctr;
 		}
 		/* fraction of previous second left */
-		frac_prev_sec = (1000000U - now.tv_usec) * 4294U;
+		frac_prev_sec = (1000000U - now->tv_usec) * 4294U;
 		curr += mul32hi(past, frac_prev_sec);
 	}
 	curr += pend;
@@ -367,7 +367,7 @@ unsigned int freq_ctr_remain(struct freq_ctr *ctr, unsigned int freq, unsigned i
  * time, which will be rounded down 1us for better accuracy, with a minimum
  * of one us.
  */
-unsigned int next_event_delay(struct freq_ctr *ctr, unsigned int freq, unsigned int pend)
+unsigned int next_event_delay(struct timeval *now, struct freq_ctr *ctr, unsigned int freq, unsigned int pend)
 {
 	unsigned int frac_prev_sec;
 	unsigned int curr, past;
@@ -375,7 +375,7 @@ unsigned int next_event_delay(struct freq_ctr *ctr, unsigned int freq, unsigned 
 
 	past = 0;
 	curr = 0;
-	age = now.tv_sec - ctr->curr_sec;
+	age = now->tv_sec - ctr->curr_sec;
 
 	if (age <= 1) {
 		past = ctr->curr_ctr;
@@ -384,7 +384,7 @@ unsigned int next_event_delay(struct freq_ctr *ctr, unsigned int freq, unsigned 
 			past = ctr->prev_ctr;
 		}
 		/* fraction of previous second left */
-		frac_prev_sec = (1000000U - now.tv_usec) * 4294U;
+		frac_prev_sec = (1000000U - now->tv_usec) * 4294U;
 		curr += mul32hi(past, frac_prev_sec);
 	}
 	curr += pend;
@@ -400,25 +400,26 @@ unsigned int next_event_delay(struct freq_ctr *ctr, unsigned int freq, unsigned 
 	return wait > 1 ? wait : 1;
 }
 
-void wait_micro(struct timeval *from, unsigned long long delay)
+/* wait this delay from <now> and update <now> with the most recent date known */
+void wait_micro(struct timeval *now, unsigned long long delay)
 {
 	struct timeval end;
 	unsigned int remain;
 
-	end.tv_sec = from->tv_sec + delay / 1000000;
-	end.tv_usec = from->tv_usec + delay % 1000000;
+	end.tv_sec  = now->tv_sec + delay / 1000000;
+	end.tv_usec = now->tv_usec + delay % 1000000;
 	while (end.tv_usec >= 1000000) {
 		end.tv_usec -= 1000000;
 		end.tv_sec++;
 	}
 
 	while (1) {
-		gettimeofday(&now, NULL);
-		if (now.tv_sec > end.tv_sec)
+		gettimeofday(now, NULL);
+		if (now->tv_sec > end.tv_sec)
 			break;
-		if (now.tv_sec == end.tv_sec && now.tv_usec >= end.tv_usec)
+		if (now->tv_sec == end.tv_sec && now->tv_usec >= end.tv_usec)
 			break;
-		remain = tv_diff(&now, &end);
+		remain = tv_diff(now, &end);
 		if (remain >= 10000)
 			usleep(9000);
 		/* otherwise do active wait */
@@ -497,8 +498,8 @@ void flood(void)
 					rampup = 0; // finished ramping up
 			}
 
-			wait_us1 = eff_pktrate ? next_event_delay(&meas_pktrate, eff_pktrate, 0) : 0;
-			wait_us2 = eff_bitrate ? next_event_delay(&meas_bitrate, eff_bitrate, 0) : 0;
+			wait_us1 = eff_pktrate ? next_event_delay(&now, &meas_pktrate, eff_pktrate, 0) : 0;
+			wait_us2 = eff_bitrate ? next_event_delay(&now, &meas_bitrate, eff_bitrate, 0) : 0;
 
 			wait_us = !eff_bitrate ? wait_us1 : !eff_pktrate ? wait_us2 :
 				(wait_us1 > wait_us2) ? wait_us1 : wait_us2;
@@ -583,7 +584,7 @@ void flood(void)
 			toterr++;
 
 		if (cfg_pktrate)
-			update_freq_ctr(&meas_pktrate, 1);
+			update_freq_ctr(&now, &meas_pktrate, 1);
 
 		if (cfg_bitrate) {
 			/* We'll count the IP traffic (len+28). We're counting
@@ -592,7 +593,7 @@ void flood(void)
 			 * add 1kbit/2 (62 bytes) to compensate for the loss of
 			 * accuracy.
 			 */
-			update_freq_ctr(&meas_bitrate, (len + 28 + 62) / 125);
+			update_freq_ctr(&now, &meas_bitrate, (len + 28 + 62) / 125);
 		}
 
 		sender++;
