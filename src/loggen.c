@@ -41,6 +41,7 @@
 #include <sys/stat.h>
 #include <time.h>
 
+#define MAX_THREADS 1
 #define MAX_SENDERS 1000
 
 struct errmsg {
@@ -176,13 +177,6 @@ unsigned int statistical_prng_state = 0x12345678;
 /* startup time */
 static struct timeval start_time;
 
-/* current time */
-struct timeval now;
-
-/* measured pkt rate / bit rate */
-static struct freq_ctr meas_pktrate; // pkt / s
-static struct freq_ctr meas_bitrate; // kbit / s
-
 /* describes one sender */
 struct sender {
 	int fd;                 /* socket to use when sending */
@@ -192,7 +186,18 @@ struct sender {
 	char hdr[256];          /* per-sender message header */
 };
 
+struct thread_data {
+	struct timeval now;     /* the thread's local time */
+	/* measured pkt rate / bit rate */
+	struct freq_ctr meas_pktrate; // pkt / s
+	struct freq_ctr meas_bitrate; // kbit / s
+	unsigned int toterr;
+	unsigned int totok;
+	unsigned int tot_wait;
+} __attribute__((aligned(64)));
+
 static struct sender senders[MAX_SENDERS];
+static struct thread_data thread_data[MAX_THREADS];
 
 /* Multiply the two 32-bit operands and shift the 64-bit result right 32 bits.
  * This is used to compute fixed ratios by setting one of the operands to
@@ -443,14 +448,14 @@ void flood(void)
 	int counter_len;
 	long long diff = 0;
 	unsigned int x;
-	unsigned toterr = 0;
 	int lorem_len = strlen(lorem);
 	const char *lorem_end = lorem + lorem_len;
 	unsigned rampup = cfg_rampup;
 	time_t prev_sec = 0;
 	int len = 0;
 	int base_len, extra_len;
-	unsigned int tot_wait = 0;
+	int thr_num = 0;
+	struct thread_data *thr = &thread_data[thr_num];
 	int sender = 0;
 
 	if (!cfg_maxsize)
@@ -467,7 +472,7 @@ void flood(void)
 	msghdr.msg_controllen = 0;
 	msghdr.msg_flags = 0;
 
-	gettimeofday(&now, NULL);
+	gettimeofday(&thr->now, NULL);
 
 	for (pkt = 0; pkt < count; pkt++) {
 		if (pkt && (cfg_pktrate || cfg_bitrate)) {
@@ -475,9 +480,9 @@ void flood(void)
 			unsigned int eff_pktrate = cfg_pktrate;
 			unsigned int eff_bitrate = cfg_bitrate;
 
-			gettimeofday(&now, NULL);
+			gettimeofday(&thr->now, NULL);
 			if (rampup) {
-				diff = tv_diff(&start_time, &now);
+				diff = tv_diff(&start_time, &thr->now);
 				if (diff < rampup) {
 					/* startup in t^4 */
 					unsigned int throttle;
@@ -498,36 +503,36 @@ void flood(void)
 					rampup = 0; // finished ramping up
 			}
 
-			wait_us1 = eff_pktrate ? next_event_delay(&now, &meas_pktrate, eff_pktrate, 0) : 0;
-			wait_us2 = eff_bitrate ? next_event_delay(&now, &meas_bitrate, eff_bitrate, 0) : 0;
+			wait_us1 = eff_pktrate ? next_event_delay(&thr->now, &thr->meas_pktrate, eff_pktrate, 0) : 0;
+			wait_us2 = eff_bitrate ? next_event_delay(&thr->now, &thr->meas_bitrate, eff_bitrate, 0) : 0;
 
 			wait_us = !eff_bitrate ? wait_us1 : !eff_pktrate ? wait_us2 :
 				(wait_us1 > wait_us2) ? wait_us1 : wait_us2;
 
 			if (wait_us) {
-				struct timeval old_now = now;
-				wait_micro(&now, wait_us);
-				diff = tv_diff(&old_now, &now);
-				tot_wait += diff;
+				struct timeval old_now = thr->now;
+				wait_micro(&thr->now, wait_us);
+				diff = tv_diff(&old_now, &thr->now);
+				thr->tot_wait += diff;
 			}
 		}
 		else if ((pkt & 63) == 0) {
-			gettimeofday(&now, NULL); // get time once in a while at least
+			gettimeofday(&thr->now, NULL); // get time once in a while at least
 		}
 
 		/* maybe it's time to stop ? */
 		if (cfg_duration) {
-			diff = tv_diff(&start_time, &now);
+			diff = tv_diff(&start_time, &thr->now);
 			if (diff >= cfg_duration)
 				break;
 		}
 
-		if (now.tv_sec != senders[sender].last_update) {
+		if (thr->now.tv_sec != senders[sender].last_update) {
 			/* time changed, rebuild the header */
 			struct tm tm;
 
-			senders[sender].last_update = now.tv_sec;
-			localtime_r(&now.tv_sec, &tm);
+			senders[sender].last_update = thr->now.tv_sec;
+			localtime_r(&thr->now.tv_sec, &tm);
 
 			if (cfg_senders == 1 || !*log_host) {
 				senders[sender].hdr_len =
@@ -544,14 +549,17 @@ void flood(void)
 			}
 		}
 
-		if (now.tv_sec != prev_sec) {
-			prev_sec = now.tv_sec;
-			if (cfg_verbose)
+		if (thr->now.tv_sec != prev_sec) {
+			prev_sec = thr->now.tv_sec;
+			if (cfg_verbose) {
+				unsigned int totpkt = thr->totok + thr->toterr;
+
 				printf("idle %5.2f%%  sent %u/%u (%.2f%%)  err %u (%.2f%%)\n",
-				       tot_wait / 10000.0,
-				       (unsigned int)pkt, count, pkt * 100.0 / count,
-				       (unsigned int)toterr, toterr * 100.0 / (pkt ? pkt : 1));
-			tot_wait = 0;
+				       thr->tot_wait / 10000.0,
+				       totpkt, count, totpkt * 100.0 / count,
+				       thr->toterr, thr->toterr * 100.0 / (totpkt ? totpkt : 1));
+			}
+			thr->tot_wait = 0;
 		}
 
 		msghdr.msg_iovlen = 0;
@@ -581,10 +589,12 @@ void flood(void)
 		len += ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, (char *)lorem_end - x, x);
 
 		if (sendmsg(senders[sender].fd, &msghdr, MSG_NOSIGNAL | MSG_DONTWAIT) < 0)
-			toterr++;
+			thr->toterr++;
+		else
+			thr->totok++;
 
 		if (cfg_pktrate)
-			update_freq_ctr(&now, &meas_pktrate, 1);
+			update_freq_ctr(&thr->now, &thr->meas_pktrate, 1);
 
 		if (cfg_bitrate) {
 			/* We'll count the IP traffic (len+28). We're counting
@@ -593,7 +603,7 @@ void flood(void)
 			 * add 1kbit/2 (62 bytes) to compensate for the loss of
 			 * accuracy.
 			 */
-			update_freq_ctr(&now, &meas_bitrate, (len + 28 + 62) / 125);
+			update_freq_ctr(&thr->now, &thr->meas_bitrate, (len + 28 + 62) / 125);
 		}
 
 		sender++;
@@ -601,7 +611,7 @@ void flood(void)
 			sender = 0;
 	}
 
-	diff = tv_diff(&start_time, &now);
+	diff = tv_diff(&start_time, &thr->now);
 	printf("%llu packets sent in %lld us\n", pkt, diff);
 }
 
