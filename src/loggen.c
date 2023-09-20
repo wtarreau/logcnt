@@ -168,7 +168,7 @@ static unsigned int cfg_minsize;
 static unsigned int cfg_maxsize;
 static unsigned int cfg_verbose;
 static unsigned long long cfg_duration; /* microseconds */
-static unsigned int count;
+static unsigned int cfg_count;
 static unsigned int cfg_senders;
 static struct sockaddr_storage cfg_addr;
 static int cfg_addrlen;
@@ -192,6 +192,9 @@ struct thread_data {
 	/* measured pkt rate / bit rate */
 	struct freq_ctr meas_pktrate; // pkt / s
 	struct freq_ctr meas_bitrate; // kbit / s
+	unsigned int cfg_pktrate;     // pkt/s or zero
+	unsigned int cfg_bitrate;     // kbit/s or zero
+	unsigned int cfg_count;       // total packets to send on this thread
 	unsigned int toterr;
 	unsigned int totok;
 	unsigned int tot_wait;
@@ -475,11 +478,11 @@ void flood(void)
 
 	gettimeofday(&thr->now, NULL);
 
-	for (pkt = 0; pkt < count; pkt++) {
-		if (pkt && (cfg_pktrate || cfg_bitrate)) {
+	for (pkt = 0; pkt < thr->cfg_count; pkt++) {
+		if (pkt && (thr->cfg_pktrate || thr->cfg_bitrate)) {
 			unsigned int wait_us1, wait_us2, wait_us;
-			unsigned int eff_pktrate = cfg_pktrate;
-			unsigned int eff_bitrate = cfg_bitrate;
+			unsigned int eff_pktrate = thr->cfg_pktrate;
+			unsigned int eff_bitrate = thr->cfg_bitrate;
 
 			gettimeofday(&thr->now, NULL);
 			if (rampup) {
@@ -573,7 +576,7 @@ void flood(void)
 
 				printf("idle %5.2f%%  sent %u/%u (%.2f%%)  err %u (%.2f%%)\n",
 				       tot_wait / (cfg_threads * 10000.0),
-				       totpkt, count, totpkt * 100.0 / count,
+				       totpkt, cfg_count, totpkt * 100.0 / cfg_count,
 				       toterr, toterr * 100.0 / (totpkt ? totpkt : 1));
 			}
 		}
@@ -609,10 +612,10 @@ void flood(void)
 		else
 			__atomic_add_fetch(&thr->totok, 1, __ATOMIC_RELAXED);
 
-		if (cfg_pktrate)
+		if (thr->cfg_pktrate)
 			update_freq_ctr(&thr->now, &thr->meas_pktrate, 1);
 
-		if (cfg_bitrate) {
+		if (thr->cfg_bitrate) {
 			/* We'll count the IP traffic (len+28). We're counting
 			 * in kbps (125 bytes). Since we're sending random-sized
 			 * datagrams that are often shorter than 1kbit we also
@@ -648,6 +651,7 @@ int main(int argc, char **argv)
 	struct errmsg err;
 	char hostname[256];
 	char *prog = *argv;
+	unsigned int t;
 	int sender;
 
 	setlinebuf(stdout);
@@ -676,8 +680,8 @@ int main(int argc, char **argv)
 		}
 		else if (argc > 1 && strcmp(*argv, "-d") == 0) {
 			cfg_duration = atol(*++argv) * 1000000ULL;
-			if (!count)
-				count = ~0U;
+			if (!cfg_count)
+				cfg_count = ~0U;
 			argc--;
 		}
 		else if (argc > 1 && strcmp(*argv, "-m") == 0) {
@@ -689,7 +693,7 @@ int main(int argc, char **argv)
 			argc--;
 		}
 		else if (argc > 1 && strcmp(*argv, "-n") == 0) {
-			count = atol(*++argv);
+			cfg_count = atol(*++argv);
 			argc--;
 		}
 		else if (argc > 1 && strcmp(*argv, "-s") == 0) {
@@ -744,7 +748,24 @@ int main(int argc, char **argv)
 
 	cfg_threads = cfg_threads ? cfg_threads : 1;
 	cfg_senders = cfg_senders ? cfg_senders : 1;
-	count = count ? count : 1;
+	cfg_count   = cfg_count ? cfg_count : 1;
+
+	/* distribute rates and counters for each thread */
+	if (cfg_count < cfg_threads ||
+	    (cfg_pktrate && cfg_pktrate < cfg_threads) ||
+	    (cfg_bitrate && cfg_bitrate < cfg_threads))
+		die(1, "Please lower the number of threads: count, pktrate and bitrate cannot be lower than the number of threads");
+
+	for (t = 0; t < cfg_threads; t++) {
+		thread_data[t].cfg_count = cfg_count / (cfg_threads - t);
+		cfg_count -= thread_data[t].cfg_count;
+
+		thread_data[t].cfg_pktrate = cfg_pktrate / (cfg_threads - t);
+		cfg_pktrate -= thread_data[t].cfg_pktrate;
+
+		thread_data[t].cfg_bitrate = cfg_bitrate / (cfg_threads - t);
+		cfg_bitrate -= thread_data[t].cfg_bitrate;
+	}
 
 	for (sender = 0; sender < cfg_senders; sender++) {
 		if ((senders[sender].fd = socket(cfg_addr.ss_family, SOCK_DGRAM, 0)) == -1)
