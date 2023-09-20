@@ -582,6 +582,7 @@ void *flood(void *arg)
 		if (thr->now.tv_sec != prev_sec) {
 			prev_sec = thr->now.tv_sec;
 			if (cfg_verbose && thr_num == 0) {
+				static unsigned int prev_totpkt;
 				unsigned int tot_wait = 0;
 				unsigned int totpkt = 0;
 				unsigned int toterr = 0;
@@ -600,10 +601,12 @@ void *flood(void *arg)
 				}
 				totpkt = totok + toterr;
 
-				printf("idle %5.2f%%  sent %u/%u (%.2f%%)  err %u (%.2f%%)\n",
+				printf("idle %5.2f%%  sent %u/%u (%.2f%%)  %u/s  err %u (%.2f%%)\n",
 				       tot_wait / (cfg_threads * 10000.0),
 				       totpkt, cfg_count, totpkt * 100.0 / cfg_count,
+				       totpkt - prev_totpkt,
 				       toterr, toterr * 100.0 / (totpkt ? totpkt : 1));
+				prev_totpkt = totpkt;
 			}
 		}
 
