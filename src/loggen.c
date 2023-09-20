@@ -41,7 +41,7 @@
 #include <sys/stat.h>
 #include <time.h>
 
-#define MAX_SENDERS 1
+#define MAX_SENDERS 1000
 
 struct errmsg {
 	char *msg;
@@ -591,6 +591,10 @@ void flood(struct sockaddr_storage *to, int tolen)
 			 */
 			update_freq_ctr(&meas_bitrate, (len + 28 + 62) / 125);
 		}
+
+		sender++;
+		if (sender >= cfg_senders)
+			sender = 0;
 	}
 
 	diff = tv_diff(&start, &now);
@@ -664,6 +668,12 @@ int main(int argc, char **argv)
 			cfg_rampup = atol(*++argv) * 1000U;
 			argc--;
 		}
+		else if (argc > 1 && strcmp(*argv, "-S") == 0) {
+			cfg_senders = atoi(*++argv);
+			if (cfg_senders > MAX_SENDERS)
+				die(1, "Too many senders\n");
+			argc--;
+		}
 		else if (strcmp(*argv, "-v") == 0) {
 			cfg_verbose = 1;
 		}
@@ -691,6 +701,7 @@ int main(int argc, char **argv)
 			"  -d <duration>  : automatically stop the test after this time in seconds\n"
 			"  -m <size>      : minimum message size (def: 0)\n"
 			"  -M <size>      : maximum message size (def: 1024, max ~5300)\n"
+			"  -S <senders>   : use this number of independent senders (sockets and counters)\n"
 			"  -v             : enable verbose mode\n"
 			"\n", prog);
 		exit(1);
