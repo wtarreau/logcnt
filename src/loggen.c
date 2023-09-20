@@ -173,6 +173,9 @@ static int cfg_addrlen;
 static char *address = "";
 unsigned int statistical_prng_state = 0x12345678;
 
+/* startup time */
+static struct timeval start_time;
+
 /* current time */
 struct timeval now;
 
@@ -431,7 +434,6 @@ void wait_micro(struct timeval *from, unsigned long long delay)
 
 void flood(void)
 {
-	struct timeval start;
 	unsigned long long pkt;
 	struct iovec iovec[3]; // hdr, counter, msg
 	struct msghdr msghdr;
@@ -464,7 +466,6 @@ void flood(void)
 	msghdr.msg_controllen = 0;
 	msghdr.msg_flags = 0;
 
-	gettimeofday(&start, NULL);
 	gettimeofday(&now, NULL);
 
 	for (pkt = 0; pkt < count; pkt++) {
@@ -475,7 +476,7 @@ void flood(void)
 
 			gettimeofday(&now, NULL);
 			if (rampup) {
-				diff = tv_diff(&start, &now);
+				diff = tv_diff(&start_time, &now);
 				if (diff < rampup) {
 					/* startup in t^4 */
 					unsigned int throttle;
@@ -515,7 +516,7 @@ void flood(void)
 
 		/* maybe it's time to stop ? */
 		if (cfg_duration) {
-			diff = tv_diff(&start, &now);
+			diff = tv_diff(&start_time, &now);
 			if (diff >= cfg_duration)
 				break;
 		}
@@ -599,7 +600,7 @@ void flood(void)
 			sender = 0;
 	}
 
-	diff = tv_diff(&start, &now);
+	diff = tv_diff(&start_time, &now);
 	printf("%llu packets sent in %lld us\n", pkt, diff);
 }
 
@@ -727,6 +728,8 @@ int main(int argc, char **argv)
 		if (connect(senders[sender].fd, (struct sockaddr *)&cfg_addr, cfg_addrlen) == -1)
 			die_err(1, "connect()");
 	}
+
+	gettimeofday(&start_time, NULL);
 
 	flood();
 
