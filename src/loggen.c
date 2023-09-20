@@ -156,7 +156,7 @@ struct freq_ctr {
 
 /* fields used by syslog, all must contain the trailing space */
 int log_prio = 134; // LOG_LOCAL0 + LOG_INFO
-const char *log_host = "localhost ";
+const char *log_host = "localhost";
 const char *log_tag  = "loggen:";
 
 static unsigned int cfg_bitrate;
@@ -527,9 +527,9 @@ void flood(struct sockaddr_storage *to, int tolen)
 
 			senders[sender].hdr_len =
 				snprintf(senders[sender].hdr, sizeof(senders[sender].hdr),
-					 "<%d> %s %2d %02d:%02d:%02d %s%s ",
+					 "<%d> %s %2d %02d:%02d:%02d %s%s%s ",
 					 log_prio, monthname[tm.tm_mon], tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
-					 log_host[1] ? log_host : "", log_tag);
+					 *log_host ? log_host : "", *log_host ? " " : "", log_tag);
 		}
 
 		if (now.tv_sec != prev_sec) {
@@ -612,11 +612,8 @@ int main(int argc, char **argv)
 
 	setlinebuf(stdout);
 
-	if (gethostname(hostname, sizeof(hostname) - 1) == 0) {
-		hostname[strlen(hostname) + 1] = 0;
-		hostname[strlen(hostname)] = ' ';
+	if (gethostname(hostname, sizeof(hostname) - 1) == 0)
 		log_host = hostname;
-	}
 
 	err.len = 0;
 	err.size = 100;
@@ -664,8 +661,7 @@ int main(int argc, char **argv)
 		}
 		else if (argc > 1 && strcmp(*argv, "-h") == 0) {
 			strncpy(hostname, *++argv, sizeof(hostname) - 1);
-			hostname[strlen(hostname) + 1] = 0;
-			hostname[strlen(hostname)] = ' ';
+			hostname[sizeof(hostname)-1] = 0;
 			log_host = hostname;
 			argc--;
 		}
