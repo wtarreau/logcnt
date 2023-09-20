@@ -536,6 +536,11 @@ void *flood(void *arg)
 
 			if (wait_us) {
 				struct timeval old_now = thr->now;
+
+				/* avoid long pauses for the very first packets */
+				if (rampup && wait_us * 10 > rampup)
+					wait_us = rampup / 10;
+
 				wait_micro(&thr->now, wait_us);
 				diff = tv_diff(&old_now, &thr->now);
 				__atomic_add_fetch(&thr->tot_wait, diff, __ATOMIC_RELAXED);
