@@ -160,6 +160,7 @@ int log_prio = 134; // LOG_LOCAL0 + LOG_INFO
 const char *log_host = "localhost";
 const char *log_tag  = "loggen:";
 
+static unsigned int cfg_threads;
 static unsigned int cfg_bitrate;
 static unsigned int cfg_pktrate;
 static unsigned int cfg_rampup;
@@ -513,7 +514,7 @@ void flood(void)
 				struct timeval old_now = thr->now;
 				wait_micro(&thr->now, wait_us);
 				diff = tv_diff(&old_now, &thr->now);
-				thr->tot_wait += diff;
+				__atomic_add_fetch(&thr->tot_wait, diff, __ATOMIC_RELAXED);
 			}
 		}
 		else if ((pkt & 63) == 0) {
@@ -551,15 +552,30 @@ void flood(void)
 
 		if (thr->now.tv_sec != prev_sec) {
 			prev_sec = thr->now.tv_sec;
-			if (cfg_verbose) {
-				unsigned int totpkt = thr->totok + thr->toterr;
+			if (cfg_verbose && thr_num == 0) {
+				unsigned int tot_wait = 0;
+				unsigned int totpkt = 0;
+				unsigned int toterr = 0;
+				unsigned int totok = 0;
+				unsigned int v, t;
+
+				for (t = 0; t < cfg_threads; t++) {
+					totok  += __atomic_load_n(&thread_data[t].totok, __ATOMIC_RELAXED);
+					toterr += __atomic_load_n(&thread_data[t].toterr, __ATOMIC_RELAXED);
+
+					/* load and reset tot_wait */
+					v = __atomic_load_n(&thread_data[t].tot_wait, __ATOMIC_RELAXED);
+					tot_wait += v;
+					if (v)
+						__atomic_sub_fetch(&thread_data[t].tot_wait, v, __ATOMIC_RELAXED);
+				}
+				totpkt = totok + toterr;
 
 				printf("idle %5.2f%%  sent %u/%u (%.2f%%)  err %u (%.2f%%)\n",
-				       thr->tot_wait / 10000.0,
+				       tot_wait / (cfg_threads * 10000.0),
 				       totpkt, count, totpkt * 100.0 / count,
-				       thr->toterr, thr->toterr * 100.0 / (totpkt ? totpkt : 1));
+				       toterr, toterr * 100.0 / (totpkt ? totpkt : 1));
 			}
-			thr->tot_wait = 0;
 		}
 
 		msghdr.msg_iovlen = 0;
@@ -589,9 +605,9 @@ void flood(void)
 		len += ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, (char *)lorem_end - x, x);
 
 		if (sendmsg(senders[sender].fd, &msghdr, MSG_NOSIGNAL | MSG_DONTWAIT) < 0)
-			thr->toterr++;
+			__atomic_add_fetch(&thr->toterr, 1, __ATOMIC_RELAXED);
 		else
-			thr->totok++;
+			__atomic_add_fetch(&thr->totok, 1, __ATOMIC_RELAXED);
 
 		if (cfg_pktrate)
 			update_freq_ctr(&thr->now, &thr->meas_pktrate, 1);
@@ -726,6 +742,7 @@ int main(int argc, char **argv)
 
 	cfg_addrlen = (cfg_addr.ss_family == AF_INET6) ? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in);
 
+	cfg_threads = cfg_threads ? cfg_threads : 1;
 	cfg_senders = cfg_senders ? cfg_senders : 1;
 	count = count ? count : 1;
 
