@@ -634,7 +634,7 @@ int main(int argc, char **argv)
 	--argc; ++argv;
 
 	while (argc && **argv == '-') {
-		if (argc > 1 && strcmp(*argv, "-t") == 0) {
+		if (argc > 1 && strcmp(*argv, "-u") == 0) {
 			address = *++argv;
 			argc--;
 		}
@@ -692,7 +692,7 @@ int main(int argc, char **argv)
 	if (argc > 0 || !*address) {
 		fprintf(stderr,
 			"Usage: %s [options]\n"
-			"  -t <addr:port> : where to send the logs (ipv4:port)\n"
+			"  -u <addr:port> : where to send the UDP logs (ipv4:port)\n"
 			"  -h <hostname>  : host name to advertise. Empty value supported. (def: $hostname)\n"
 			"  -n <count>     : send no more than this number of packets (def: 1)\n"
 			"  -r <pktrate>   : limit output pkt rate to this number of messages per second\n"
