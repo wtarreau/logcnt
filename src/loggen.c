@@ -525,11 +525,19 @@ void flood(struct sockaddr_storage *to, int tolen)
 			senders[sender].last_update = now.tv_sec;
 			localtime_r(&now.tv_sec, &tm);
 
-			senders[sender].hdr_len =
-				snprintf(senders[sender].hdr, sizeof(senders[sender].hdr),
-					 "<%d> %s %2d %02d:%02d:%02d %s%s%s ",
-					 log_prio, monthname[tm.tm_mon], tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
-					 *log_host ? log_host : "", *log_host ? " " : "", log_tag);
+			if (cfg_senders == 1 || !*log_host) {
+				senders[sender].hdr_len =
+					snprintf(senders[sender].hdr, sizeof(senders[sender].hdr),
+						 "<%d> %s %2d %02d:%02d:%02d %s%s%s ",
+						 log_prio, monthname[tm.tm_mon], tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
+						 *log_host ? log_host : "", *log_host ? " " : "", log_tag);
+			} else {
+				senders[sender].hdr_len =
+					snprintf(senders[sender].hdr, sizeof(senders[sender].hdr),
+						 "<%d> %s %2d %02d:%02d:%02d %s-%d %s ",
+						 log_prio, monthname[tm.tm_mon], tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
+						 log_host, sender, log_tag);
+			}
 		}
 
 		if (now.tv_sec != prev_sec) {
