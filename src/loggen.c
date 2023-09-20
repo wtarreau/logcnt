@@ -182,6 +182,7 @@ static struct freq_ctr meas_bitrate; // kbit / s
 struct sender {
 	int fd;                 /* socket to use when sending */
 	unsigned int counter;   /* per-sender packet counter */
+	time_t last_update;     /* last tv_sec we rebuilt the header */
 	int hdr_len;            /* header length */
 	char hdr[256];          /* per-sender message header */
 };
@@ -517,11 +518,11 @@ void flood(struct sockaddr_storage *to, int tolen)
 				break;
 		}
 
-		if (now.tv_sec != prev_sec) {
+		if (now.tv_sec != senders[sender].last_update) {
 			/* time changed, rebuild the header */
 			struct tm tm;
 
-			prev_sec = now.tv_sec;
+			senders[sender].last_update = now.tv_sec;
 			localtime_r(&now.tv_sec, &tm);
 
 			senders[sender].hdr_len =
@@ -529,7 +530,10 @@ void flood(struct sockaddr_storage *to, int tolen)
 					 "<%d> %s %2d %02d:%02d:%02d %s%s ",
 					 log_prio, monthname[tm.tm_mon], tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
 					 log_host[1] ? log_host : "", log_tag);
+		}
 
+		if (now.tv_sec != prev_sec) {
+			prev_sec = now.tv_sec;
 			if (cfg_verbose)
 				printf("idle %5.2f%%  sent %u/%u (%.2f%%)  err %u (%.2f%%)\n",
 				       tot_wait / 10000.0,
