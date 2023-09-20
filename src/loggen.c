@@ -574,6 +574,18 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 	printf("%llu packets sent in %lld us\n", pkt, diff);
 }
 
+void die(int err, const char *msg)
+{
+	fprintf(stderr, "%s\n", msg);
+	exit(err);
+}
+
+void die_err(int err, const char *msg)
+{
+	perror(msg);
+	exit(err);
+}
+
 int main(int argc, char **argv)
 {
 	struct sockaddr_storage ss;
@@ -674,20 +686,14 @@ int main(int argc, char **argv)
 
 	count = count ? count : 1;
 
-	if ((fd = socket(ss.ss_family, SOCK_DGRAM, 0)) == -1) {
-		perror("socket");
-		exit(1);
-	}
+	if ((fd = socket(ss.ss_family, SOCK_DGRAM, 0)) == -1)
+		die_err(1, "socket");
 
-	if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) == -1) {
-		perror("setsockopt(SO_REUSEADDR)");
-		exit(1);
-	}
+	if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) == -1)
+		die_err(1, "setsockopt(SO_REUSEADDR)");
 
-	if (connect(fd, (struct sockaddr *)&ss, addrlen) == -1) {
-		perror("connect()");
-		exit(1);
-	}
+	if (connect(fd, (struct sockaddr *)&ss, addrlen) == -1)
+		die_err(1, "connect()");
 
 	flood(fd, &ss, addrlen);
 
