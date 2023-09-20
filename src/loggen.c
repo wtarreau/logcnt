@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <pthread.h>
 #include <ctype.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -41,7 +42,7 @@
 #include <sys/stat.h>
 #include <time.h>
 
-#define MAX_THREADS 1
+#define MAX_THREADS 64
 #define MAX_SENDERS 1000
 
 struct errmsg {
@@ -188,6 +189,7 @@ struct sender {
 } __attribute__((aligned(64)));
 
 struct thread_data {
+	pthread_t pth;
 	struct timeval now;     /* the thread's local time */
 	/* measured pkt rate / bit rate */
 	struct freq_ctr meas_pktrate; // pkt / s
@@ -444,7 +446,7 @@ void wait_micro(struct timeval *now, unsigned long long delay)
 	(IOV)[(CNT)-1].iov_len;  /* return size */	\
 })
 
-void flood(void)
+void *flood(void *arg)
 {
 	unsigned long long pkt;
 	struct iovec iovec[3]; // hdr, counter, msg
@@ -460,7 +462,7 @@ void flood(void)
 	time_t prev_sec = 0;
 	int len = 0;
 	int base_len, extra_len;
-	int thr_num = 0;
+	int thr_num = (long)arg;
 	struct thread_data *thr = &thread_data[thr_num];
 	int sender = thr->first_sender;
 	int stop_sender = sender + thr->cfg_senders;
@@ -635,6 +637,7 @@ void flood(void)
 
 	diff = tv_diff(&start_time, &thr->now);
 	printf("%llu packets sent in %lld us\n", pkt, diff);
+	pthread_exit(NULL);
 }
 
 void die(int err, const char *msg)
@@ -675,6 +678,12 @@ int main(int argc, char **argv)
 		}
 		else if (argc > 1 && strcmp(*argv, "-r") == 0) {
 			cfg_pktrate = atol(*++argv);
+			argc--;
+		}
+		else if (argc > 1 && strcmp(*argv, "-t") == 0) {
+			cfg_threads = atoi(*++argv);
+			if (cfg_threads > MAX_THREADS)
+				die(1, "Too many threads\n");
 			argc--;
 		}
 		else if (argc > 1 && strcmp(*argv, "-b") == 0) {
@@ -728,6 +737,7 @@ int main(int argc, char **argv)
 		fprintf(stderr,
 			"Usage: %s [options]\n"
 			"  -u <addr:port> : where to send the UDP logs (ipv4:port)\n"
+			"  -t <threads>   : use this number of threads to send (def: 1)\n"
 			"  -h <hostname>  : host name to advertise. Empty value supported. (def: $hostname)\n"
 			"  -n <count>     : send no more than this number of packets (def: 1)\n"
 			"  -r <pktrate>   : limit output pkt rate to this number of messages per second\n"
@@ -788,7 +798,12 @@ int main(int argc, char **argv)
 
 	gettimeofday(&start_time, NULL);
 
-	flood();
+
+	for (t = 0; t < cfg_threads; t++)
+		pthread_create(&thread_data[t].pth, NULL, flood, (void *)(long)t);
+
+	for (t = 0; t < cfg_threads; t++)
+		pthread_join(thread_data[t].pth, NULL);
 
 	return 0;
 }
