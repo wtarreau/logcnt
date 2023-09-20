@@ -425,7 +425,7 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 	int counter_len;
 	long long diff = 0;
 	unsigned int x;
-	unsigned toterr;
+	unsigned toterr = 0;
 	int hdr_len;
 	int lorem_len = strlen(lorem);
 	const char *lorem_end = lorem + lorem_len;
@@ -520,7 +520,10 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 					   log_host[1] ? log_host : "", log_tag);
 
 			if (cfg_verbose)
-				printf("idle %5.2f%%\n", tot_wait / 10000.0);
+				printf("idle %5.2f%%  sent %u/%u (%.2f%%)  err %u (%.2f%%)\n",
+				       tot_wait / 10000.0,
+				       (unsigned int)pkt, count, pkt * 100.0 / count,
+				       (unsigned int)toterr, toterr * 100.0 / (pkt ? pkt : 1));
 			tot_wait = 0;
 		}
 
