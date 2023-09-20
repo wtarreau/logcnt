@@ -467,6 +467,24 @@ void *flood(void *arg)
 	int sender = thr->first_sender;
 	int stop_sender = sender + thr->cfg_senders;
 
+	gettimeofday(&thr->now, NULL);
+
+	/* let's pre-initialize the rate counters to pretend the
+	 * frequency was already stable at the target speed so
+	 * that we don't send an initial burst.
+	 */
+	if (thr->cfg_pktrate) {
+		thr->meas_pktrate.curr_sec = thr->now.tv_sec;
+		thr->meas_pktrate.prev_ctr = rampup ? 0 : thr->cfg_pktrate;
+		thr->meas_pktrate.curr_ctr = rampup ? 0 : mul32hi(thr->cfg_pktrate, thr->now.tv_usec * 4294U);
+	}
+
+	if (thr->cfg_bitrate) {
+		thr->meas_bitrate.curr_sec = thr->now.tv_sec;
+		thr->meas_pktrate.prev_ctr = rampup ? 0 : thr->cfg_bitrate;
+		thr->meas_pktrate.curr_ctr = rampup ? 0 : mul32hi(thr->cfg_bitrate, thr->now.tv_usec * 4294U);
+	}
+
 	if (!cfg_maxsize)
 		cfg_maxsize = 1024;
 
@@ -480,8 +498,6 @@ void *flood(void *arg)
 	msghdr.msg_control = NULL;
 	msghdr.msg_controllen = 0;
 	msghdr.msg_flags = 0;
-
-	gettimeofday(&thr->now, NULL);
 
 	for (pkt = 0; pkt < thr->cfg_count; pkt++) {
 		if (pkt && (thr->cfg_pktrate || thr->cfg_bitrate)) {
