@@ -495,10 +495,12 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 			gettimeofday(&now, NULL); // get time once in a while at least
 		}
 
-		diff = tv_diff(&start, &now);
 		/* maybe it's time to stop ? */
-		if (cfg_duration && diff >= cfg_duration)
-			break;
+		if (cfg_duration) {
+			diff = tv_diff(&start, &now);
+			if (diff >= cfg_duration)
+				break;
+		}
 
 		if (now.tv_sec != prev_sec) {
 			/* time changed, rebuild the header */
@@ -555,6 +557,7 @@ void flood(int fd, struct sockaddr_storage *to, int tolen)
 		}
 	}
 
+	diff = tv_diff(&start, &now);
 	printf("%llu packets sent in %lld us\n", pkt, diff);
 }
 
