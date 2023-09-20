@@ -608,7 +608,7 @@ void *flood(void *arg)
 
 		x = statistical_prng();
 		x = (x >> 22) * ((x >> 11) & 2047) * (x & 2047);
-		x = mul32hi(x, extra_len - 2) + base_len + 1;
+		x = mul32hi(x, extra_len - 2) + base_len;
 
 		len += ADD_IOV(msghdr.msg_iov, msghdr.msg_iovlen, (char *)lorem_end - x, x);
 
