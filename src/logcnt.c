@@ -279,6 +279,7 @@ int main(int argc, char **argv)
 	unsigned int tot_time = 0;
 	int cfg_absdate = 0;
 	int cfg_maxidle = 0;
+	int cfg_rcvbuf = 0;
 	int num_threads = 1;
 	int port = 514;
 	int i, fd;
@@ -305,6 +306,10 @@ int main(int argc, char **argv)
 			cfg_maxidle = atoi(argv[1]);
 			argc--; argv++;
 		}
+		else if (argc > 1 && strcmp(*argv, "-b") == 0) {
+			cfg_rcvbuf = atoi(argv[1]);
+			argc--; argv++;
+		}
 		else if (strcmp(*argv, "-a") == 0) {
 			cfg_absdate = 1;
 		}
@@ -320,6 +325,7 @@ int main(int argc, char **argv)
 			"  -t <threads> : set receiving threads count (def: 1)\n"
 			"  -p <port>    : set listening port (def: 514)\n"
 			"  -i <seconds> : set idle duration before automatic reset\n"
+			"  -b <bytes>   : set each socket's rcvbuf to this value\n"
 			"  -a           : use absolute date\n"
 			"\n", prog);
 		exit(1);
@@ -345,6 +351,9 @@ int main(int argc, char **argv)
 
 		setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
 		setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof(one));
+
+		if (cfg_rcvbuf)
+			setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &cfg_rcvbuf, sizeof(cfg_rcvbuf));
 
 		if (bind(fd, (struct sockaddr *)&saddr, sizeof(saddr)) < 0)
 			die_err(1, "bind");
