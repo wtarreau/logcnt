@@ -9,6 +9,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <limits.h>
 #include <time.h>
 
 #define MAX_THREADS 64
@@ -36,6 +37,7 @@ struct sender_data {
 } __attribute__((aligned(64)));
 
 struct sender_data sender_data[MAX_SENDERS];
+static int cfg_count_only;
 
 
 void die(int err, const char *msg)
@@ -116,13 +118,23 @@ void *udprx(void *arg)
 	unsigned int counter;
 
 	while (1) {
-		salen = sizeof(addr);
-		len = recvfrom(fd, buffer, sizeof(buffer), 0, (struct sockaddr*)&addr, &salen);
+#if defined(__linux__)
+		if (cfg_count_only) {
+			len = recv(fd, buffer, 0, MSG_TRUNC);
+		} else
+#endif
+		{
+			salen = sizeof(addr);
+			len = recvfrom(fd, buffer, sizeof(buffer), 0, (struct sockaddr*)&addr, &salen);
+		}
 		if (len < 0)
 			break;
 
 		td->count++;
 		td->bytes += len;
+
+		if (cfg_count_only)
+			continue;
 
 		/* skip priority */
 		p1 = buffer;
@@ -313,6 +325,9 @@ int main(int argc, char **argv)
 		else if (strcmp(*argv, "-a") == 0) {
 			cfg_absdate = 1;
 		}
+		else if (strcmp(*argv, "-c") == 0) {
+			cfg_count_only = 1;
+		}
 		else
 			break;
 		argc--;
@@ -327,6 +342,7 @@ int main(int argc, char **argv)
 			"  -i <seconds> : set idle duration before automatic reset\n"
 			"  -b <bytes>   : set each socket's rcvbuf to this value\n"
 			"  -a           : use absolute date\n"
+			"  -c           : only count received msgs, do not analyze them\n"
 			"\n", prog);
 		exit(1);
 	}
